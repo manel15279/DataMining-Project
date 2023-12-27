@@ -440,8 +440,7 @@ class StatisticsCOVID19:
         plt.legend()
 
 
-
-class WelcomeApp:
+class App:
     def __init__(self):
         self.dataFrame1 = pd.read_csv('Dataset1.csv')
         self.dataset1 = np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1)
@@ -453,7 +452,6 @@ class WelcomeApp:
         self.preprocessor2 = Preprocessing(self.dataset2, self.dataFrame2)
         self.create_interface()
         
-
     def infos_dataset(self, dataFrame):
         num_rows, num_cols = pd.DataFrame(dataFrame).shape
         attr_desc = pd.DataFrame(dataFrame).describe()
@@ -468,7 +466,6 @@ class WelcomeApp:
         self.preprocessor2.remplacement_aberantes_generale2(aberrante_meth)
         self.dataset2 = self.preprocessor2.dataset
         return self.dataset2
-    
     
     def plots(self, df, graph, graph_type1, attribute1, zone2, attribute2, period2, year2, month2, year22, n5, time_period6, attribute6):
         stats = StatisticsCOVID19(df)
@@ -726,6 +723,5 @@ class WelcomeApp:
     def launch(self):
         self.demo_interface.launch()
 
-# Example usage
-welcome_app = WelcomeApp()
-welcome_app.launch()
+app = App()
+app.launch()
