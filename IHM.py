@@ -20,9 +20,12 @@ import csv
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
 import random
-import plotly.express as px
+import squarify
 import seaborn as sns
 import gradio as gr
+
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("Set2")
 
 class Preprocessing:
     def __init__(self, dataset, dataFrame):
@@ -196,6 +199,9 @@ class Preprocessing:
            self.remplacement_val_manquantes2(method, attribute_index)
         
     def remplacement_aberantes_generale2(self, method):
+        if method=="Discritisation":
+            categorical_columns = [0, 1, 2]
+            self.numeric_columns = [col for col in self.numeric_columns if col not in categorical_columns]
         for attribute_index in self.numeric_columns:
             self.remplacement_val_aberrantes(method, attribute_index)
 
@@ -309,79 +315,67 @@ class AttributeAnalyzer:
 
 
 class StatisticsCOVID19:
-    def __init__(self, dataset, dataFrame):
-        self.df = pd.DataFrame(dataset, columns=dataFrame.columns.tolist())
+    def __init__(self, df):
+        self.df = pd.DataFrame(df)
+        self.df['Year'] = pd.to_datetime(self.df['Start date']).dt.year
+        self.df['Month'] = pd.to_datetime(self.df['Start date']).dt.month
 
-    def plot_total_cases_and_positive_tests(self):
-        totals = self.df.groupby('zcta')[['case count', 'positive tests']].sum().reset_index()
-        zones = totals['zcta'].tolist()
-
-        bar_width = 0.35
+    def plot_total_cases_and_positive_tests(self, chosen_attribute):
+        totals = self.df.groupby('zcta')[[chosen_attribute]].sum().reset_index()
+        bar_width = 0.5
         index = totals.index
-        plt.bar(index, totals['case count'], bar_width, label='case count')
-        plt.bar(index + bar_width, totals['positive tests'], bar_width, label='positive tests')
-        plt.xticks(index + bar_width / 2, zones)
+        plt.bar(index, totals[chosen_attribute], bar_width, label=chosen_attribute)
         plt.xlabel('Zones')
         plt.ylabel('Count')
-        plt.title('Distribution du nombre total des cas confirmés et tests positifs par zones')
+        plt.title(f'Distribution du nombre total de {chosen_attribute} par zones')
 
-    def plot_total_cases_and_positive_tests_treemap(self):
-        totals = self.df.groupby('zcta')[['case count', 'positive tests']].sum().reset_index()
+    def plot_total_cases_and_positive_tests_treemap(self, chosen_attribute):
+        totals = self.df.groupby('zcta')[[chosen_attribute]].sum().reset_index()
 
-        fig = px.treemap(totals, path=['zcta'], values='case count', title='Total Case Count by ZCTA')
-        fig.show()
+        totals['value_normalized'] = totals[chosen_attribute] / totals[chosen_attribute].sum()
 
-        fig = px.treemap(totals, path=['zcta'], values='positive tests', title='Total Positive Tests by ZCTA')
-       
+        totals = totals.sort_values(by=chosen_attribute, ascending=False)
+
+        colors = plt.cm.tab10(range(len(totals)))
+
+        squarify.plot(
+            sizes=totals['value_normalized'],
+            label=totals['zcta'],
+            color=colors,
+            alpha=0.7  
+        )
+        plt.title(f'Distribution du nombre de {chosen_attribute} par zone')
+        plt.axis('off')  
 
     def weekly_plot(self, chosen_zone, chosen_year, chosen_month, chosen_attribute):
-        self.df['Start date'] = pd.to_datetime(self.df['Start date'])
-        self.df['end date'] = pd.to_datetime(self.df['end date'])
-
-        self.df['Month'] = self.df['Start date'].dt.month
-        self.df['Year'] = self.df['Start date'].dt.year
 
         zone_df = self.df[self.df['zcta'] == chosen_zone]
 
-        plt.figure(figsize=(12, 6))
         hebdo_df = zone_df[(zone_df['Month'] == chosen_month) & (zone_df['Year'] == chosen_year)]
 
-        sns.lineplot(x='Start date', y=chosen_attribute, data=hebdo_df, label=chosen_attribute)
+        plt.plot(hebdo_df['Start date'], hebdo_df[chosen_attribute], label=chosen_attribute)
         plt.title(f'L\'évolution hebdomadaire du total de {chosen_attribute} pour la zone {chosen_zone} pendant le {chosen_month} ème mois de l\'année {chosen_year}')
         plt.xlabel('Dates')
         plt.ylabel('Count')
 
     def monthly_plot(self, chosen_zone, chosen_year, chosen_attribute):
-        self.df['Start date'] = pd.to_datetime(self.df['Start date'])
-        self.df['end date'] = pd.to_datetime(self.df['end date'])
-
-        self.df['Month'] = self.df['Start date'].dt.month
-        self.df['Year'] = self.df['Start date'].dt.year
 
         zone_df = self.df[self.df['zcta'] == chosen_zone]
 
-        plt.figure(figsize=(12, 6))
         monthly_df = zone_df[zone_df['Year'] == chosen_year]
         month_df = monthly_df.groupby('Month')[[chosen_attribute]].sum().reset_index()
-
-        sns.lineplot(x='Month', y=chosen_attribute, data=month_df, label=chosen_attribute)
+        plt.plot(month_df['Month'], month_df[chosen_attribute], label=chosen_attribute)
         plt.title(f'L\'évolution mensuelle du total de {chosen_attribute} pour la zone {chosen_zone} pendant l\'année {chosen_year}')
         plt.xlabel('Months')
         plt.ylabel('Count') 
         
     def annual_plot(self, chosen_zone, chosen_attribute):
-        self.df['Start date'] = pd.to_datetime(self.df['Start date'])
-        self.df['end date'] = pd.to_datetime(self.df['end date'])
-
-        self.df['Year'] = self.df['Start date'].dt.year
 
         zone_df = self.df[self.df['zcta'] == chosen_zone]
 
-        plt.figure(figsize=(12, 6))
         annual_df = zone_df.groupby('Year')[[chosen_attribute]].sum().reset_index()
-        annual_df['Year'] = annual_df['Year'].astype(int)
 
-        sns.lineplot(x='Year', y=chosen_attribute, data=annual_df, label=chosen_attribute)
+        plt.plot(annual_df['Year'], annual_df[chosen_attribute], label=chosen_attribute)
         plt.title(f'L\'évolution annuelle du total de {chosen_attribute} pour la zone {chosen_zone}')
         plt.xlabel('Years')
         plt.ylabel('Count') 
@@ -389,90 +383,61 @@ class StatisticsCOVID19:
 
 
     def stacked_bar_plot(self):
-        self.df['Year'] = pd.to_datetime(self.df['Start date']).dt.year
+        self.df = self.df.sort_values(by=['Year'])  # Sort the DataFrame by 'Year'
 
         grouped_data = self.df.groupby(['Year', 'zcta'])['case count'].sum().unstack()
 
-        ax = grouped_data.plot(kind='bar', stacked=True, figsize=(10, 6))
-        
-        ax.set_title('Stacked Bar Graph of Case Count by Zone and Year')
-        ax.set_xlabel('Year')
-        ax.set_ylabel('Case Count')
-        ax.legend(title='Zone', loc='upper left', bbox_to_anchor=(1, 1))
+        years = self.df['Year'].unique()
+        zone_columns = grouped_data.columns
+
+        bottom_values = None
+
+        for zone in zone_columns:
+            values = grouped_data[zone].reindex(years, fill_value=0).values
+            if bottom_values is None:
+                plt.bar(years, values, label=zone)
+                bottom_values = values
+            else:
+                plt.bar(years, values, label=zone, bottom=bottom_values)
+                bottom_values += values
+
+        plt.title('Stacked Bar Graph of Case Count by Zone and Year')
+        plt.xlabel('Year')
+        plt.ylabel('Case Count')
+        plt.legend(title='Zone', bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.xticks(years) 
 
 
     def pop_tests_plot(self):
         data = self.df[['population', 'test count']]
         grouped_data = data.groupby('population').sum().reset_index()
-        print(grouped_data)
 
-        plt.figure(figsize=(10, 6))
-        sns.lineplot(x='population', y='test count', data=grouped_data, marker='o')
+        plt.plot(grouped_data['population'], grouped_data['test count'])
         plt.title('Population vs Test Count')
         plt.xlabel('Population')
         plt.ylabel('Test count')
 
+    def plot_top_zones_impacted(self, n):
+        grouped_data = self.df.groupby('zcta')['case count'].sum().sort_values(ascending=True).head(n)
+        bar_width = 0.1
 
-    def plots(self, graph, graph_type1, zone2, attribute2, period2, year2, month2, year22):
-        if graph == "Total des cas confirmés et tests positifs par zones":
-            if graph_type1 == "Bar Chart":
-                plot1 = plt.figure()
-                self.plot_total_cases_and_positive_tests()
-                plot1.savefig("plot1.png")
-                plt.close(plot1)
-                plot = ["plot1.png"]
-                return plot
-            
-            if graph_type1 == "Tree Map":
-                plot1 = plt.figure()
-                self.plot_total_cases_and_positive_tests_treemap()
-                plot1.savefig("plot1.png")
-                plt.close(plot1)
-                plot = ["plot1.png"]
-                return plot
-            
-        if graph == "Evolution du virus au fil du temps":
-            if period2 == "Weekly":
-                plot2 = plt.figure()
-                self.weekly_plot(zone2, year2, month2, attribute2)
-                plot2.savefig("plot2_weekly.png")
-                plt.close(plot2)
-                plot = ["plot2_weekly.png"]
-                return plot
-            
-            if period2 == "Monthly":
-                plot2 = plt.figure()
-                self.monthly_plot(zone2, year2, attribute2)
-                plot2.savefig("plot2_monthly.png")
-                plt.close(plot2)
-                plot = ["plot2_monthly.png"]
-                return plot
-            
-            if period2 == "Annual":
-                plot2 = plt.figure()
-                self.annual_plot(zone2, attribute2)
-                plot2.savefig("plot2_annual.png")
-                plt.close(plot2)
-                plot = ["plot2_annual.png"]
-                return plot
-            
-        if graph == "Total des cas par zone et par année":
-            plot3 = plt.figure()
-            self.stacked_bar_plot()
-            plot3.savefig("plot3.png")
-            plt.close(plot3)
-            plot = ["plot3.png"]
-            return plot
-        
-        if graph == "Rapport entre la population et le nombre de tests effectués":
-            plot4 = plt.figure()
-            self.pop_tests_plot()
-            plot4.savefig("plot4.png")
-            plt.close(plot4)
-            plot = ["plot4.png"]
-            return plot
+        grouped_data.plot.barh(figsize=(12, 6), width=bar_width)
+        plt.title(f'Top {n} Zones les plus impactées par le Coronavirus')
+        plt.xlabel('Nombre de Cas')
 
+    def plot_time_period_data(self, chosen_time_period, chosen_attribute):
+        selected_data = self.df[(self.df['time_period'] == chosen_time_period)]
+        grouped_data = selected_data.groupby('zcta')[[chosen_attribute]].sum().reset_index()
 
+        bar_width = 0.2
+        index = grouped_data.index
+
+        plt.bar(index - bar_width, grouped_data[chosen_attribute], width=bar_width, label=chosen_attribute)
+        plt.xticks(index - bar_width, grouped_data['zcta'])
+        plt.xlabel('Zone (zcta)')
+        plt.ylabel('Count')
+        plt.title(f'Total of {chosen_attribute} for Time Period {chosen_time_period}')
+        plt.legend()
 
 
 
@@ -487,6 +452,7 @@ class WelcomeApp:
         self.dataset2 = self.dataFrame2.to_numpy()
         self.preprocessor2 = Preprocessing(self.dataset2, self.dataFrame2)
         self.create_interface()
+        
 
     def infos_dataset(self, dataFrame):
         num_rows, num_cols = pd.DataFrame(dataFrame).shape
@@ -502,6 +468,82 @@ class WelcomeApp:
         self.preprocessor2.remplacement_aberantes_generale2(aberrante_meth)
         self.dataset2 = self.preprocessor2.dataset
         return self.dataset2
+    
+    
+    def plots(self, df, graph, graph_type1, attribute1, zone2, attribute2, period2, year2, month2, year22, n5, time_period6, attribute6):
+        stats = StatisticsCOVID19(df)
+        if graph == "Total des cas confirmés et tests positifs par zones":
+            if graph_type1 == "Bar Chart":
+                plot1 = plt.figure()
+                stats.plot_total_cases_and_positive_tests(attribute1)
+                plot1.savefig("plot1.png")
+                plt.close(plot1)
+                plot = ["plot1.png"]
+                return plot
+            
+            if graph_type1 == "Tree Map":
+                plot1 = plt.figure()
+                plot1 = stats.plot_total_cases_and_positive_tests_treemap(attribute1)
+                plt.close(plot1)
+                plot = ["plot1.png"]
+                return plot
+            
+        if graph == "Evolution du virus au fil du temps":
+            if period2 == "Weekly":
+                plot2 = plt.figure()
+                stats.weekly_plot(zone2, year2, month2, attribute2)
+                plot2.savefig("plot2_weekly.png")
+                plt.close(plot2)
+                plot = ["plot2_weekly.png"]
+                return plot
+            
+            if period2 == "Monthly":
+                plot2 = plt.figure()
+                stats.monthly_plot(zone2, year22, attribute2)
+                plot2.savefig("plot2_monthly.png")
+                plt.close(plot2)
+                plot = ["plot2_monthly.png"]
+                return plot
+            
+            if period2 == "Annual":
+                plot2 = plt.figure()
+                stats.annual_plot(zone2, attribute2)
+                plot2.savefig("plot2_annual.png")
+                plt.close(plot2)
+                plot = ["plot2_annual.png"]
+                return plot
+            
+        if graph == "Total des cas par zone et par année":
+            plot3 = plt.figure()
+            stats.stacked_bar_plot()
+            plot3.savefig("plot3.png")
+            plt.close(plot3)
+            plot = ["plot3.png"]
+            return plot
+        
+        if graph == "Rapport entre la population et le nombre de tests effectués":
+            plot4 = plt.figure()
+            stats.pop_tests_plot()
+            plot4.savefig("plot4.png")
+            plt.close(plot4)
+            plot = ["plot4.png"]
+            return plot
+        
+        if graph == "Top 5 des zones les plus impactées par le coronavirus":
+            plot5 = plt.figure()
+            stats.plot_top_zones_impacted(n5)
+            plot5.savefig("plot5.png")
+            plt.close(plot5)
+            plot = ["plot5.png"]
+            return plot
+        
+        if graph == "Rapport entre les cas confirmés, les tests effectués et les tests positifs a une periode choisie pour chaque zone":
+            plot6 = plt.figure()
+            stats.plot_time_period_data(time_period6, attribute6)
+            plot6.savefig("plot6.png")
+            plt.close(plot6)
+            plot = ["plot6.png"]
+            return plot
 
     def create_interface(self):
         with gr.Blocks() as demo:
@@ -584,7 +626,6 @@ class WelcomeApp:
                         btn.click(fn=self.infos_dataset, inputs=inputs, outputs=outputs)
 
                 with gr.Tab("Preprocessing"):
-
                     with gr.Column():
                         gr.Markdown("""# Preprocessing of Dataset2""")
 
@@ -593,21 +634,23 @@ class WelcomeApp:
                                 gr.Dropdown(["Linear Regression", "Discritisation"], multiselect=False, label="Outliers", info="Select a method to handle the outliers in the dataset :")]
                             
                         with gr.Row():
-                            outputs = gr.Dataframe(label="Dataset2 preprocessed", headers=self.dataFrame2.columns.tolist())
+                            outputs_preprocess = gr.Dataframe(label="Dataset2 preprocessed", headers=self.dataFrame2.columns.tolist())
 
                         with gr.Row():
                             gr.ClearButton(inputs)
                             btn = gr.Button("Submit")
-                            btn.click(fn=self.preprocessing_general2, inputs=inputs, outputs=outputs)
+                            btn.click(fn=self.preprocessing_general2, inputs=inputs, outputs=outputs_preprocess)
 
-                
                 with gr.Tab("Statistics"):
                     with gr.Column():
                         with gr.Row():
                             graph = gr.Dropdown(["Total des cas confirmés et tests positifs par zones", "Evolution du virus au fil du temps", "Total des cas par zone et par année",
-                                                 "Rapport entre la population et le nombre de tests effectués"], multiselect=False, label="Graphs", info="Select a graph to plot :")
+                                                 "Rapport entre la population et le nombre de tests effectués", 
+                                                 "Top 5 des zones les plus impactées par le coronavirus",
+                                                 "Rapport entre les cas confirmés, les tests effectués et les tests positifs a une periode choisie pour chaque zone"], multiselect=False, label="Graphs", info="Select a graph to plot :")
                             with gr.Row(visible=False) as row:
-                                plot1_param = [gr.Radio(["Tree Map", "Bar Chart"])]
+                                plot1_param = [gr.Radio(["Tree Map", "Bar Chart"]),
+                                               gr.Dropdown(['case count', 'positive tests'], multiselect=False, label="Atribute", info="Choose an attribute to plot :")]
 
                             with gr.Row(visible=False) as row2:
                                 plot2_param = [gr.Dropdown(self.dataFrame2['zcta'].unique().tolist(), multiselect=False, label="Zone", info="Select a zone to plot :"), 
@@ -619,18 +662,41 @@ class WelcomeApp:
                                 with gr.Row(visible=False) as row2_m:
                                     monthly_param = [gr.Dropdown([2019, 2020, 2021, 2022], multiselect=False, label="Year", info="Choose a year:")]
                                 
+                            with gr.Row(visible=False) as row5:
+                                plot5_param = [gr.Slider(1, 7, value=5, label="Number of zones", info="Choose between 1 and 7 zones", step=1)]
+
+                            with gr.Row(visible=False) as row6:
+                                plot6_param = [gr.Dropdown(np.unique(self.dataset2[:, 1]).tolist(), multiselect=False, label="time period", info="Select a time period to plot :"),
+                                    gr.Dropdown(["case count", "test count", "positive tests"], multiselect=False, label="Attribute", info="Select an attribute to plot :")]
+
+
                                 def update_visibility(selected_graph):
                                     if selected_graph == "Total des cas confirmés et tests positifs par zones":
                                         return {row: gr.Row(visible=True),
-                                                row2: gr.Row(visible=False)}
+                                                row2: gr.Row(visible=False), 
+                                                row5: gr.Row(visible=False), 
+                                                row6: gr.Row(visible=False)}
                                     if selected_graph == "Evolution du virus au fil du temps":
                                         return {row2: gr.Row(visible=True),
-                                                row: gr.Row(visible=False)}
+                                                row: gr.Row(visible=False), 
+                                                row5: gr.Row(visible=False), 
+                                                row6: gr.Row(visible=False)}
                                     if selected_graph == "Total des cas par zone et par année" or selected_graph == "Rapport entre la population et le nombre de tests effectués":
                                         return {row2: gr.Row(visible=False),
-                                                row: gr.Row(visible=False)}
-
-                                        
+                                                row: gr.Row(visible=False),
+                                                row5: gr.Row(visible=False), 
+                                                row6: gr.Row(visible=False)}
+                                    if selected_graph == "Top 5 des zones les plus impactées par le coronavirus":
+                                        return {row2: gr.Row(visible=False),
+                                                row: gr.Row(visible=False),
+                                                row5: gr.Row(visible=True), 
+                                                row6: gr.Row(visible=False)}
+                                    if selected_graph == "Rapport entre les cas confirmés, les tests effectués et les tests positifs a une periode choisie pour chaque zone":
+                                        return {row2: gr.Row(visible=False),
+                                                row: gr.Row(visible=False),
+                                                row5: gr.Row(visible=False), 
+                                                row6: gr.Row(visible=True)}
+                                    
                                 def update_visibility_param(selected_period):
                                     if selected_period == "Weekly":
                                         return {row2_w: gr.Row(visible=True),
@@ -642,7 +708,7 @@ class WelcomeApp:
                                         return {row2_w: gr.Row(visible=False),
                                                 row2_m: gr.Row(visible=False)}
                                     
-                                graph.change(update_visibility, inputs=graph, outputs=[row, row2])
+                                graph.change(update_visibility, inputs=graph, outputs=[row, row2, row5, row6])
                                 plot2_param[2].change(update_visibility_param, inputs=plot2_param[2], outputs=[row2_w, row2_m])
                         
 
@@ -652,8 +718,7 @@ class WelcomeApp:
                         with gr.Row():
                             gr.ClearButton(inputs)
                             btn = gr.Button("Submit")
-                            self.stats = StatisticsCOVID19(self.dataset2, self.dataFrame2)
-                            btn.click(fn=self.stats.plots, inputs=[graph]+plot1_param+plot2_param+weekly_param+monthly_param, outputs=outputs)
+                            btn.click(fn=self.plots, inputs=[outputs_preprocess]+[graph]+plot1_param+plot2_param+weekly_param+monthly_param+plot5_param+plot6_param, outputs=outputs)
                     
                     
         self.demo_interface = demo
