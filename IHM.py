@@ -860,7 +860,9 @@ class App:
         
         return plots
 
-    def recommendation(self, method, a1, a2, a3):
+    def recommendation(self, a1, a2, a3, method):
+        print("##############################", a1, a2, a3)
+        print("**************************************",method)
         instance = []
         if a1 != None:
             instance.append(a1)
