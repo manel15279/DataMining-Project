@@ -23,6 +23,11 @@ import random
 import squarify
 import seaborn as sns
 import gradio as gr
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.spatial import Delaunay
+import psutil
+
+
 
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("Set2")
@@ -440,6 +445,201 @@ class StatisticsCOVID19:
         plt.legend()
 
 
+class FrequentItemsets:
+    def Ck_generator(self, k, L, datasetT):
+        if k==1:
+            uniItemListe=set()
+            for i in range(0,len(datasetT)):
+                uniItemListe.update(set(datasetT[i]))
+            return [(v,) for v in uniItemListe]
+        else:
+            C=[]
+            if len(L)==0: return C
+            listeitemsunique=sorted(set([element for tuple in L.keys() for element in tuple]))
+            if len(listeitemsunique)<k: return []
+            combinations_list = list(combinations(listeitemsunique, k))
+            if k==2: 
+                return combinations_list
+            #le pruning
+            for combi in combinations_list:
+                exist=True
+                sous_combinations_list = list(combinations(combi, k-1))
+                
+                for sous_combi in sous_combinations_list:
+                    if sous_combi not in list(L.keys()):
+                        exist=False
+                        break
+                if exist==True:
+                    C.append(combi)   
+            return C
+        
+    def support_calculator(self, C, datasetT):
+        dico={}
+        dico.update({val:0 for val in C})
+        for row in datasetT:
+            combinations_list = list(combinations(row, len(list(dico.keys())[0])))
+            for val in combinations_list:
+                if val in dico: 
+                    dico[val]+=1
+        dico.update({key:val/len(datasetT) for key,val in dico.items()})
+    
+        return dico
+
+    def Lk_generator(self, C, supp_min):
+        c={}
+        c=({key:float(val) for key,val in C.items() if float(val)>=supp_min})
+        return c
+    
+    def appriori(self, min_supp, datasetT):
+        L=[]
+        k=1
+        C=self.Ck_generator(k,None,datasetT)
+    
+        while(len(C)!=0):
+            S=self.support_calculator(C,datasetT)
+        
+            l=self.Lk_generator(S,min_supp)
+            if len(l)!=0:L.append(l)
+        
+            k+=1
+            C=self.Ck_generator(k,l,None)
+            
+        return L
+    
+    def regle_association(self, L):
+        regles=pd.DataFrame()
+        first=True
+        for key,value in L.items():
+            if first==True:
+                k=len(key)
+                first==False
+            if k==2 :
+                    new_row = {'antecedant':(key[0],),'consequent':(key[1],),'mesure':0.0,'support':value}
+                    regles = pd.concat([regles, pd.DataFrame([new_row])], ignore_index=True)
+                    new_row={'antecedant':(key[1],),'consequent':(key[0],),'mesure':0.0,'support':value}
+                    regles = pd.concat([regles, pd.DataFrame([new_row])], ignore_index=True)
+            else:
+                for i in range(k-1,k-(k//2)-1,-1):
+                    sous_combinations_list = list(combinations(key,i))#ab c  / ac bc 
+                    for sous_comb in sous_combinations_list:
+                        reste=sorted(set(key).symmetric_difference(sous_comb))
+                        regles = pd.concat([regles, pd.DataFrame([{'antecedant':tuple(reste),'consequent':sous_comb,'mesure':0.0,'support':value}])], ignore_index=True)
+                        if not len(tuple(reste))==len(sous_comb):
+                            regles = pd.concat([regles, pd.DataFrame([{'antecedant':sous_comb,'consequent':tuple(reste),'mesure':0.0,'support':value}])], ignore_index=True)
+            
+        return regles
+    
+    def mesure_calculator(self, r, methode, L):#A,D->B,C
+        if methode==0:#confidence
+            return (r["support"]/L[len(r["antecedant"])-1][r["antecedant"]])
+        elif methode==1:#cosine
+            return (r["support"]/math.sqrt(L[len(r["antecedant"])-1][r["antecedant"]]*L[len(r["consequent"])-1][r["consequent"]]))
+        elif methode==2:#lift
+            return r["support"]/(L[len(r["antecedant"])-1][r["antecedant"]]*L[len(r["consequent"])-1][r["consequent"]])
+        elif methode==3:#jackard
+            return r["support"]/(L[len(r["antecedant"])-1][r["antecedant"]]+L[len(r["consequent"])-1][r["consequent"]]- r["support"])
+        else:#kulc
+            return 0.5*((r["support"]/L[len(r["antecedant"])-1][r["antecedant"]])+(r["support"]/L[len(r["consequent"])-1][r["consequent"]]))
+
+    def regles_frequente(self, L, conf_min, m):
+
+        regles=pd.DataFrame()
+        for l in L[1:]:
+            regles= pd.concat([regles, self.regle_association(l)], ignore_index=True)
+            
+
+        for i in range(0,len(regles)):
+            regles.iloc[i,2] = self.mesure_calculator(regles.loc[i],m,L)
+        
+        if not len(regles)==0:
+            regles=regles[regles['mesure'] >= conf_min]
+            
+        return regles
+    
+    def rules_nbr_plot(self, transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
+        for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.01):
+            for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.01):
+                L=self.appriori(sup_min, transactions_table)
+                rs=self.regles_frequente(L,conf_min,0)
+            
+                results=np.vstack((results,np.array([sup_min,conf_min,len(rs)])))
+
+                
+        fig, ax = plt.subplots(subplot_kw={'projection': '3d'})
+
+        Z = results[:, 2].reshape(results.shape[0], 1)
+        ax.scatter(results[:, 0], results[:, 1], Z, c='r', marker='o')
+
+        tri = Delaunay(results[:, :2])
+
+        ax.plot_trisurf(results[:, 0], results[:, 1], Z.flatten(), triangles=tri.simplices, cmap="viridis", linewidth=0.9, antialiased=True)
+
+        ax.set_xlabel('sup')
+        ax.set_ylabel('conf')
+        ax.set_zlabel('nbr de regles frequentes', labelpad=10)
+
+        ax.view_init(elev=10, azim=-40)
+        plt.title("Nombre de regles frequentes générées par sup_min et conf_min")
+        
+    def freq_items_nbr_plot(self, transactions_table, supp_lower_bound, supp_upper_bound):
+        for sup_min in np.arange(supp_upper_bound,supp_lower_bound,-0.001):
+            L=self.appriori(sup_min,transactions_table)
+            resultsf=np.vstack((resultsf,np.array([sup_min,sum(len(l) for l in L)]))) 
+        
+        x = resultsf[:,0]
+        y = resultsf[:,1]
+
+        plt.plot(x, y)
+        plt.title('Evolution du nombre de motifs frequents selon le support min')
+        plt.xlabel('supmin')
+        plt.ylabel('nbr motifs frequents')
+
+    def time_exec_plot(self, transactions_table, supp_lower_bound, supp_upper_bound):
+        for sup_min in np.arange(supp_upper_bound,supp_lower_bound,-0.002):
+            duree=0.0
+            for j in range(0,10):
+                start=time.time()
+                L=self.appriori(sup_min,transactions_table)
+                duree+=time.time()-start
+            TimeResults=np.vstack((TimeResults,np.array([sup_min,duree/10.0])))
+                    
+        x = TimeResults[:,0]
+        y = TimeResults[:,1]
+
+        plt.plot(x, y)
+        plt.title('Evolution du temps d''execution d''apriori selon le sup_min')
+        plt.xlabel('Supmin')
+        plt.ylabel('Temps d execution')
+
+    def memory_alloc_plot(self, transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
+        for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.003):
+            for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.0001):
+                initial_memory = psutil.Process().memory_info().rss / 1024 / 1024 /2024 # in MB
+                L=self.appriori(sup_min,transactions_table)
+                rs=self.regles_frequente(L,conf_min,0)
+                final_memory = psutil.Process().memory_info().rss / 1024 / 1024 /2024 # in MB
+                resultsMemory=np.vstack((resultsMemory,np.array([sup_min,conf_min,final_memory-initial_memory])))
+
+        fig, ax = plt.subplots(subplot_kw={'projection': '3d'})
+
+        Z = resultsMemory[:, 2].reshape(resultsMemory.shape[0], 1)
+        ax.scatter(resultsMemory[:, 0], resultsMemory[:, 1], Z, c='r', marker='o')
+
+        # Create Delaunay triangulation
+        tri = Delaunay(resultsMemory[:, :2])
+
+        # Plot the surface using the triangulation
+        ax.plot_trisurf(resultsMemory[:, 0], resultsMemory[:, 1], Z.flatten(), triangles=tri.simplices, cmap="viridis", linewidth=0.9, antialiased=True)
+
+        ax.set_xlabel('sup__min')
+        ax.set_ylabel('conf_min')
+        ax.set_zlabel('memoire',labelpad=10)
+        ax.view_init(elev=10, azim=-30)
+        plt.title("Evolution de l'espace aloué à l''algorithme apriori et regles d''association selon le sup_min et conf_min")
+
+
+            
+
 class App:
     def __init__(self):
         self.dataFrame1 = pd.read_csv('Dataset1.csv')
@@ -450,6 +650,10 @@ class App:
         self.dataFrame2 = self.dataFrame2.replace({pd.NA: np.nan})
         self.dataset2 = self.dataFrame2.to_numpy()
         self.preprocessor2 = Preprocessing(self.dataset2, self.dataFrame2)
+        self.dataFrame3 = pd.read_csv('Dataset3.xlsx - 8.forFMI.csv', delimiter=',', decimal=',')
+        self.dataset3 = self.dataFrame3.to_numpy()
+        self.FIL = FrequentItemsets()
+        self.selected_attribute_dataset3 = 0
         self.create_interface()
         
     def infos_dataset(self, dataFrame):
@@ -542,12 +746,116 @@ class App:
             plot = ["plot6.png"]
             return plot
 
+    def Discretisation(self, method, attribute, K):
+        vals=self.dataset3[:,attribute].copy()
+        vals.sort()
+
+        if method == "Equal-Width Discretization":
+            #Equal-Width Discretization
+            nbrelmt=math.ceil(self.dataset3[:,attribute].shape[0]/K)
+            
+            for val in range(0,self.dataset3[:,attribute].shape[0]):  
+                for i in range(0,vals.shape[0],nbrelmt):
+                    if(vals[i]>self.dataset3[val,attribute]):
+                        sup=i
+                        break
+                self.dataset3[val,attribute]=np.mean(vals[sup-nbrelmt:sup])       
+        else:
+            #Equal-Frequency Discretization
+            largeur= (self.dataset3[:,attribute].max() - self.dataset3[:,attribute].min())/math.ceil(K)
+            
+            dic={}
+            bornesup= self.dataset3[:,attribute].min()+largeur
+            for val in vals:
+                if val>=bornesup and bornesup<self.dataset3[:,attribute].max():
+                    bornesup+=largeur
+
+                if bornesup in dic:   
+                    dic[bornesup].append(val)
+                else:
+                    dic[bornesup]=[val]
+
+            for i in range(0,self.dataset3[:,attribute].shape[0]):
+                for item in dic.items():
+                    if (self.dataset3[i,attribute]>=item[0]-largeur and self.dataset3[i,attribute]<item[0]):
+                        self.dataset3[i,attribute]=np.mean(item[1])
+                        break
+
+    def discretization_plot(self, method, attribute, K):
+        plot = plt.figure()
+        #Before Discretization
+        plt.hist(self.dataset3[:,attribute], bins=K, edgecolor='black')
+        
+        #Discretization
+        self.Discretisation(method, attribute, K)
+        self.transactions_table = np.array([np.sort(list(four)) for four in zip(self.dataset3[:, attribute].astype(str), self.dataset3[:,3], self.dataset3[:,4], self.dataset3[:,5])])
+
+        #After Discretization
+        attribute_label = self.dataFrame3.columns[attribute]
+        freq=Counter(self.dataset3[:, attribute])
+        x_values = np.sort(list(freq.keys()))
+        y_values = [freq[x] for x in x_values]
+        
+        plt.plot(x_values, y_values)
+        plt.xlabel(f'{attribute_label}')
+        plt.ylabel('Frequency')
+        plt.title(f'Discretized {attribute_label}')
+        plot.savefig("discretization_plot.png")
+        plt.close(plot)
+        plot = ["discretization_plot.png"]
+        return self.dataset3, plot, self.transactions_table
+
+    def FIL_general(self, transactions_table, supp_min, conf_min, metric):
+        self.transactions_table = pd.DataFrame(transactions_table).to_numpy()
+        self.L = self.FIL.appriori(supp_min, self.transactions_table)
+        self.association_rules = self.FIL.regles_frequente(self.L, conf_min, metric)
+
+        return self.association_rules
+
+    def experimentation_plots(self, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
+        plot1 = plt.figure()
+        self.FIL.rules_nbr_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
+        plot1.savefig("rules_nbr_plot.png")
+        plt.close(plot1)
+
+        plot2 = plt.figure()
+        self.FIL.freq_items_nbr_plot(self.transactions_table, supp_lower_bound, supp_upper_bound)
+        plot2.savefig("freq_items_nbr_plot.png")
+        plt.close(plot2)
+
+        plot3 = plt.figure()
+        self.FIL.time_exec_plot(self.transactions_table, supp_lower_bound, supp_upper_bound)
+        plot3.savefig("time_exec_plot.png")
+        plt.close(plot3)
+
+        plot4 = plt.figure()
+        self.FIL.memory_alloc_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
+        plot4.savefig("memory_alloc_plot.png")
+        plt.close(plot4)
+
+        plots = ["rules_nbr_plot.png", "freq_items_nbr_plot.png", "time_exec_plot.png", "memory_alloc_plot.png"]
+        
+        return plots
+
+    def recommendation(self, method, a1, a2, a3):
+        instance = [a1, a2, a3]
+        r_filtered=[]
+        for index, row in self.association_rules.iterrows():
+            if method == "Strict":
+                if row[0]==tuple(sorted(instance)):
+                    r_filtered.append(row)
+            else:
+                if set(list(row[0])).issubset(set(instance)):
+                    r_filtered.append(row)
+
+        return pd.DataFrame([r["consequent"] for r in r_filtered], columns=["Consequent 1", "Consequent 2"])
+
     def create_interface(self):
         with gr.Blocks() as demo:
             with gr.Tab("Agriculture"):
                 with gr.Tab("Dataset Visualization"):
                     with gr.Column():
-                        gr.Markdown("""# Dataset Analysis Dashboard""")
+                        gr.Markdown("""# Dataset1 Analysis Dashboard""")
                         
                         with gr.Row():
                             inputs = [gr.Dataframe(label="Dataset1", value=self.dataFrame1)]
@@ -716,8 +1024,103 @@ class App:
                             gr.ClearButton(inputs)
                             btn = gr.Button("Submit")
                             btn.click(fn=self.plots, inputs=[outputs_preprocess]+[graph]+plot1_param+plot2_param+weekly_param+monthly_param+plot5_param+plot6_param, outputs=outputs)
-                    
-                    
+            
+            with gr.Tab("Frequent Itemset Learning"):
+                with gr.Tab("Dataset Visualization"):
+                    with gr.Column():
+                        gr.Markdown("""# Dataset3 Analysis Dashboard""")
+                        
+                        with gr.Row():
+                            inputs = [gr.Dataframe(label="Dataset3", value=self.dataFrame3)]
+                           
+                            with gr.Column():
+                                outputs = [gr.Textbox(label="Number of Rows"), gr.Textbox(label="Number of Columns"), gr.Dataframe(label="Attributes description")]
+                        
+                        btn = gr.Button("Submit")
+                        btn.click(fn=self.infos_dataset, inputs=inputs, outputs=outputs)
+
+                with gr.Tab("Discretization"):
+                    with gr.Column():
+                        gr.Markdown("""# Dataset3 Discretization""")
+                        
+                        with gr.Row():
+                            method = [gr.Dropdown(["Equal-Width Discretization", "Equal-Frequency Discretization"], multiselect=False, label="Method", info="Select a method of Discretization :")]
+                            attribute3 = gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.dataFrame3.columns.tolist()) if i < 3], value=4, multiselect=False, label="Attributes", info="Select an attribute to discretize :")
+                            bins_nbr = gr.Slider(2, 8, step=1, visible=False, label="Bins Number", info="Choose the number of bins :", value=8)
+                           
+                            def update_visibility_discretization(select_attribute):
+                                    self.selected_attribute_dataset3 = select_attribute
+                                    if select_attribute == 0:
+                                        return {bins_nbr : gr.Slider(maximum=len(np.unique(self.dataset3[:, select_attribute].tolist())), visible=True)}
+                                    if select_attribute == 1:
+                                        return {bins_nbr : gr.Slider(maximum=len(np.unique(self.dataset3[:, select_attribute].tolist())), visible=True)}
+                                    else:
+                                        return {bins_nbr : gr.Slider(maximum=len(np.unique(self.dataset3[:, select_attribute].tolist())), visible=True)}
+                                    
+                            attribute3.change(update_visibility_discretization, inputs=[attribute3], outputs=bins_nbr)
+                        with gr.Row():
+                            output_dataset3 = [gr.Dataframe(label="Dataset3 after Discretization", headers=self.dataFrame3.columns.tolist())]
+                            discretization_gallery = [gr.Gallery(label="Graphs", columns=(1,2))]
+
+                        with gr.Row():
+                            gr.ClearButton(method+[attribute3]+[bins_nbr])
+                            btn_discr = gr.Button("Submit")
+                            
+                with gr.Tab("Frequent Itemsets and Association Rules"):
+                    with gr.Column():
+                        gr.Markdown("""# Dataset3 Frequent Itemsets and Association Rules""")
+                        
+                        with gr.Row():
+                            transactions_table = gr.Dataframe(label="Transactions Table", headers=["Chosen Attribute", "Soil", "Crop", "Fertilizer"])
+                            with gr.Column():    
+                                inputs = [gr.Number(label="Minimal Support", value=0.01, step=0.01, minimum=0.01, maximum=1),
+                                        gr.Number(label="Minimal Confidence", value=0.1, step=0.01, minimum=0.01, maximum=1),
+                                        gr.Dropdown([(f"{m}", i) for i, m in enumerate(["Confidence", "Cosine", "Lift", "Jaccard", "Kulczynski"])], multiselect=False, label="Metric", info="Select a metric for association rules :")]
+                            
+                        with gr.Row():
+                            rules = gr.Dataframe(label="Association Rules")
+
+                        with gr.Row():
+                            gr.ClearButton(inputs)
+                            btn = gr.Button("Submit")
+                            btn.click(fn=self.FIL_general, inputs=[transactions_table]+inputs, outputs=rules)
+                            btn_discr.click(fn=self.discretization_plot, inputs=method+[attribute3]+[bins_nbr], outputs=output_dataset3+discretization_gallery+[transactions_table])
+
+                with gr.Tab("Experimentations"):
+                    with gr.Column():
+                        gr.Markdown("""# Dataset3 Experimentations""")
+                        
+                        with gr.Row():  
+                            inputs = [gr.Number(label="Lower Bound of Minimal Support", minimum=0.0, maximum=0.3, value=0.0, step=0.001),
+                                    gr.Number(label="Upper Bound of Minimal Support", minimum=0.0, maximum=0.3, value=0.3, step=0.001),
+                                    gr.Number(label="Lower Bound of Minimal Confidence", minimum=0.0, maximum=0.3, value=0.0, step=0.001),
+                                    gr.Number(label="Upper Bound of Minimal Confidence", minimum=0.0, maximum=0.3, value=0.3, step=0.001)]
+                        with gr.Row():
+                            experimentation_gallery = [gr.Gallery(label="Graphs", columns=(1,2))]
+
+                        with gr.Row():
+                            gr.ClearButton(inputs)
+                            btn = gr.Button("Submit")
+                            btn.click(fn=self.experimentation_plots, inputs=inputs, outputs=experimentation_gallery)
+                
+                with gr.Tab("Recommender"):
+                    with gr.Column():
+                        gr.Markdown("""# Dataset3 Recommender""")
+                        gr.Markdown(""" Insert new row :""")
+                        with gr.Row():  
+                            inputs = [gr.Textbox(label="Antecedent 1", value="Urea"),
+                                gr.Textbox(label="Antecedent 2", value="29.283076923076926"),
+                                gr.Textbox(label="Antecedent 3", value="Coconut"), 
+                                gr.Radio(["Strict", "Not Strict"], label="Method")]
+                        with gr.Row():
+                            rec = [gr.Dataframe(label="Recommendation Table")]
+
+                        with gr.Row():
+                            gr.ClearButton(inputs)
+                            btn = gr.Button("Submit")
+                            btn.click(fn=self.recommendation, inputs=inputs, outputs=rec)
+
+
         self.demo_interface = demo
 
     def launch(self):
