@@ -26,11 +26,11 @@ import gradio as gr
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import Delaunay
 import psutil
-
-
+import io
 
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("Set2")
+
 
 class Preprocessing:
     def __init__(self, dataset, dataFrame):
@@ -210,7 +210,6 @@ class Preprocessing:
         for attribute_index in self.numeric_columns:
             self.remplacement_val_aberrantes(method, attribute_index)
 
-
 class AttributeAnalyzer:
     def __init__(self, dataset, dataFrame):
         self.dataFrame = dataFrame
@@ -318,7 +317,6 @@ class AttributeAnalyzer:
 
         return moyenne2, mediane2, mode2, q0, q1, q2, q3, q4, ecart_type, plots
 
-
 class StatisticsCOVID19:
     def __init__(self, df):
         self.df = pd.DataFrame(df)
@@ -343,14 +341,26 @@ class StatisticsCOVID19:
 
         colors = plt.cm.tab10(range(len(totals)))
 
+        fig, ax = plt.subplots(figsize=(10, 6))
         squarify.plot(
             sizes=totals['value_normalized'],
             label=totals['zcta'],
             color=colors,
-            alpha=0.7  
+            alpha=0.7,
+            ax=ax 
         )
+
         plt.title(f'Distribution du nombre de {chosen_attribute} par zone')
-        plt.axis('off')  
+        plt.axis('off') 
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png')
+        plt.close(fig)
+
+        # Save the buffer to the specified filename
+        with open("total_cases_and_positive_tests_treemap_plot.png", 'wb') as f:
+            f.write(buffer.getvalue())
+
+        return "total_cases_and_positive_tests_treemap_plot.png" 
 
     def weekly_plot(self, chosen_zone, chosen_year, chosen_month, chosen_attribute):
 
@@ -443,7 +453,6 @@ class StatisticsCOVID19:
         plt.ylabel('Count')
         plt.title(f'Total of {chosen_attribute} for Time Period {chosen_time_period}')
         plt.legend()
-
 
 class FrequentItemsets:
     def Ck_generator(self, k, L, datasetT):
@@ -557,6 +566,7 @@ class FrequentItemsets:
         return regles
     
     def rules_nbr_plot(self, transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
+        results= np.empty((0,3),float)
         for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.01):
             for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.01):
                 L=self.appriori(sup_min, transactions_table)
@@ -564,7 +574,6 @@ class FrequentItemsets:
             
                 results=np.vstack((results,np.array([sup_min,conf_min,len(rs)])))
 
-                
         fig, ax = plt.subplots(subplot_kw={'projection': '3d'})
 
         Z = results[:, 2].reshape(results.shape[0], 1)
@@ -580,8 +589,17 @@ class FrequentItemsets:
 
         ax.view_init(elev=10, azim=-40)
         plt.title("Nombre de regles frequentes générées par sup_min et conf_min")
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png')
+        plt.close(fig)
+
+        with open("rules_nbr_plot.png", 'wb') as f:
+            f.write(buffer.getvalue())
+
+        return "rules_nbr_plot.png"
         
     def freq_items_nbr_plot(self, transactions_table, supp_lower_bound, supp_upper_bound):
+        resultsf= np.empty((0,2),float)
         for sup_min in np.arange(supp_upper_bound,supp_lower_bound,-0.001):
             L=self.appriori(sup_min,transactions_table)
             resultsf=np.vstack((resultsf,np.array([sup_min,sum(len(l) for l in L)]))) 
@@ -595,6 +613,8 @@ class FrequentItemsets:
         plt.ylabel('nbr motifs frequents')
 
     def time_exec_plot(self, transactions_table, supp_lower_bound, supp_upper_bound):
+        TimeResults= np.empty((0,2),float)
+
         for sup_min in np.arange(supp_upper_bound,supp_lower_bound,-0.002):
             duree=0.0
             for j in range(0,10):
@@ -612,8 +632,10 @@ class FrequentItemsets:
         plt.ylabel('Temps d execution')
 
     def memory_alloc_plot(self, transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
-        for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.003):
-            for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.0001):
+        resultsMemory= np.empty((0,3),float)
+
+        for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.06):
+            for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.02):
                 initial_memory = psutil.Process().memory_info().rss / 1024 / 1024 /2024 # in MB
                 L=self.appriori(sup_min,transactions_table)
                 rs=self.regles_frequente(L,conf_min,0)
@@ -636,9 +658,16 @@ class FrequentItemsets:
         ax.set_zlabel('memoire',labelpad=10)
         ax.view_init(elev=10, azim=-30)
         plt.title("Evolution de l'espace aloué à l''algorithme apriori et regles d''association selon le sup_min et conf_min")
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png')
+        plt.close(fig)
 
+        # Save the buffer to the specified filename
+        with open("memory_alloc_plot.png", 'wb') as f:
+            f.write(buffer.getvalue())
 
-            
+        return "memory_alloc_plot.png"
+
 
 class App:
     def __init__(self):
@@ -683,10 +712,8 @@ class App:
                 return plot
             
             if graph_type1 == "Tree Map":
-                plot1 = plt.figure()
                 plot1 = stats.plot_total_cases_and_positive_tests_treemap(attribute1)
-                plt.close(plot1)
-                plot = ["plot1.png"]
+                plot = [plot1]
                 return plot
             
         if graph == "Evolution du virus au fil du temps":
@@ -809,14 +836,13 @@ class App:
         self.transactions_table = pd.DataFrame(transactions_table).to_numpy()
         self.L = self.FIL.appriori(supp_min, self.transactions_table)
         self.association_rules = self.FIL.regles_frequente(self.L, conf_min, metric)
+        self.L = [(k, v) for dictionary in self.L for k, v in dictionary.items()]
 
-        return self.association_rules
+        return self.association_rules, pd.DataFrame(self.L, columns=['Frequent Itemset', 'Support'])
 
     def experimentation_plots(self, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
-        plot1 = plt.figure()
-        self.FIL.rules_nbr_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
-        plot1.savefig("rules_nbr_plot.png")
-        plt.close(plot1)
+        
+        plot1 = self.FIL.rules_nbr_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
 
         plot2 = plt.figure()
         self.FIL.freq_items_nbr_plot(self.transactions_table, supp_lower_bound, supp_upper_bound)
@@ -828,17 +854,21 @@ class App:
         plot3.savefig("time_exec_plot.png")
         plt.close(plot3)
 
-        plot4 = plt.figure()
-        self.FIL.memory_alloc_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
-        plot4.savefig("memory_alloc_plot.png")
-        plt.close(plot4)
+        plot4 = self.FIL.memory_alloc_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
 
-        plots = ["rules_nbr_plot.png", "freq_items_nbr_plot.png", "time_exec_plot.png", "memory_alloc_plot.png"]
+        plots = [plot1, "freq_items_nbr_plot.png", "time_exec_plot.png", plot4]
         
         return plots
 
     def recommendation(self, method, a1, a2, a3):
-        instance = [a1, a2, a3]
+        instance = []
+        if a1 != None:
+            instance.append(a1)
+        if a2 != None:
+            instance.append(a2)
+        if a3 != None:
+            instance.append(a3)
+
         r_filtered=[]
         for index, row in self.association_rules.iterrows():
             if method == "Strict":
@@ -848,7 +878,14 @@ class App:
                 if set(list(row[0])).issubset(set(instance)):
                     r_filtered.append(row)
 
-        return pd.DataFrame([r["consequent"] for r in r_filtered], columns=["Consequent 1", "Consequent 2"])
+        if r_filtered:
+            max_consequent_length = max(len(r["consequent"]) for r in r_filtered)
+        else:
+            max_consequent_length = 0
+
+        consequent_columns = [f"Consequent {i+1}" for i in range(max_consequent_length)]
+
+        return pd.DataFrame([r["consequent"] for r in r_filtered], columns=consequent_columns)
 
     def create_interface(self):
         with gr.Blocks() as demo:
@@ -1078,12 +1115,13 @@ class App:
                                         gr.Dropdown([(f"{m}", i) for i, m in enumerate(["Confidence", "Cosine", "Lift", "Jaccard", "Kulczynski"])], multiselect=False, label="Metric", info="Select a metric for association rules :")]
                             
                         with gr.Row():
-                            rules = gr.Dataframe(label="Association Rules")
+                            freq_item = [gr.Dataframe(label="Frequent Itemsets")]
+                            rules = [gr.Dataframe(label="Association Rules")]
 
                         with gr.Row():
                             gr.ClearButton(inputs)
                             btn = gr.Button("Submit")
-                            btn.click(fn=self.FIL_general, inputs=[transactions_table]+inputs, outputs=rules)
+                            btn.click(fn=self.FIL_general, inputs=[transactions_table]+inputs, outputs=rules+freq_item)
                             btn_discr.click(fn=self.discretization_plot, inputs=method+[attribute3]+[bins_nbr], outputs=output_dataset3+discretization_gallery+[transactions_table])
 
                 with gr.Tab("Experimentations"):
@@ -1091,17 +1129,17 @@ class App:
                         gr.Markdown("""# Dataset3 Experimentations""")
                         
                         with gr.Row():  
-                            inputs = [gr.Number(label="Lower Bound of Minimal Support", minimum=0.0, maximum=0.3, value=0.0, step=0.001),
-                                    gr.Number(label="Upper Bound of Minimal Support", minimum=0.0, maximum=0.3, value=0.3, step=0.001),
-                                    gr.Number(label="Lower Bound of Minimal Confidence", minimum=0.0, maximum=0.3, value=0.0, step=0.001),
-                                    gr.Number(label="Upper Bound of Minimal Confidence", minimum=0.0, maximum=0.3, value=0.3, step=0.001)]
+                            inputs_exp = [gr.Number(label="Lower Bound of Minimal Support", minimum=0.0, maximum=0.3, value=0.01, step=0.01),
+                                    gr.Number(label="Upper Bound of Minimal Support", minimum=0.0, maximum=0.3, value=0.2, step=0.01),
+                                    gr.Number(label="Lower Bound of Minimal Confidence", minimum=0.0, maximum=0.3, value=0.01, step=0.01),
+                                    gr.Number(label="Upper Bound of Minimal Confidence", minimum=0.0, maximum=0.3, value=0.2, step=0.01)]
                         with gr.Row():
                             experimentation_gallery = [gr.Gallery(label="Graphs", columns=(1,2))]
 
                         with gr.Row():
                             gr.ClearButton(inputs)
                             btn = gr.Button("Submit")
-                            btn.click(fn=self.experimentation_plots, inputs=inputs, outputs=experimentation_gallery)
+                            btn.click(fn=self.experimentation_plots, inputs=inputs_exp, outputs=experimentation_gallery)
                 
                 with gr.Tab("Recommender"):
                     with gr.Column():
