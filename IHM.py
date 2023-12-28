@@ -861,14 +861,12 @@ class App:
         return plots
 
     def recommendation(self, a1, a2, a3, method):
-        print("##############################", a1, a2, a3)
-        print("**************************************",method)
         instance = []
-        if a1 != None:
+        if a1 != "":
             instance.append(a1)
-        if a2 != None:
+        if a2 != "":
             instance.append(a2)
-        if a3 != None:
+        if a3 != "":
             instance.append(a3)
 
         r_filtered=[]
