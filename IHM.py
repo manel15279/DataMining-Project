@@ -68,6 +68,13 @@ class Preprocessing:
         q2=self.calcul_mediane(attribute)
         q4=liste[-1]
         return [q0,q1,q2,q3,q4]
+    
+    def ecart_type_home_made(self, attribut):
+        datasetCurrated=np.delete(self.dataset[:,attribut], self.val_manquante(attribut))
+        mean = np.mean(datasetCurrated)
+        ecarts = [(val - mean) ** 2 for val in datasetCurrated]
+        variance = np.mean(ecarts) 
+        return np.sqrt(variance)
 
     def Discretisation(self, attribute):
         vals = self.dataset[:,attribute].copy()
@@ -135,12 +142,21 @@ class Preprocessing:
         for i in range(0,self.dataset.shape[1]):
             self.normalisation(methode,i, vmin, vmax)
 
-    def preprocessing_general1(self, manque_meth, aberrante_meth, normalization_meth, vmin, vmax):
-        self.remplacement_manquant_generale(manque_meth)
-        self.remplacement_aberantes_generale(aberrante_meth)
-        self.normalisation_generale(normalization_meth, int(vmin), int(vmax)) 
-
-        return self.dataset
+    def coef_correl(self, attribut1,attribut2):
+        moy1=np.mean(self.dataset[:,attribut1])
+        moy2=np.mean(self.dataset[:,attribut2])
+        e1=self.ecart_type_home_made(attribut1)
+        e2=self.ecart_type_home_made(attribut2)
+        return (self.dataset[:,attribut1].dot(self.dataset[:,attribut2])-(len(self.dataset)*moy1*moy2))/((len(self.dataset)-1)*(e1*e2))
+    
+    def reduire_dim(self, treashold):
+        to_delete=[]
+        for i in range(0,self.dataset.shape[1]-1):
+            for j in range(i+1,self.dataset.shape[1]):
+                if (np.abs(self.coef_correl(i,j))>treashold):
+                    print(i,j)
+                    to_delete.append(i)
+        self.dataset = np.delete(self.dataset,to_delete, axis=1)
     
     #===============================DATASET2================================================================================================================================================================================================================================
     def year_mapping(self, time_period):
@@ -668,6 +684,227 @@ class FrequentItemsets:
 
         return "memory_alloc_plot.png"
 
+def distance(instance1,instance2,methode):
+    if methode==0: #cosine
+         return  1-(  ( np.sum([instance1[i]*instance2[i] for i in range(0,len(instance1))]))  /(math.sqrt(np.sum([i**2 for i in instance1]))*math.sqrt(np.sum([i**2 for i in instance2]))))
+    else: #minkowski
+        return sum( np.abs(instance1-instance2)**methode)**(1/methode)
+
+class ClassifierMetrics:
+    def __init__(self, Y_test, y_pred):
+        self.Y_test = Y_test
+        self.y_pred = y_pred
+    
+    def confusion_matrix(self):
+        N = len(np.unique(self.Y_test)) 
+        M= np.zeros((N,N),dtype=int)
+        for i in range(0,self.Y_test.shape[0]) : 
+            M[int(self.Y_test[i])][int(self.y_pred[i])] += 1 
+
+        return M
+
+    def Values(m):
+        TP= m.diagonal()
+        FP = m.sum(axis=0) - TP
+        FN = m.sum(axis=1) - TP
+        TN =  m.sum() - (TP + FN + FP)
+        return TP, FN, FP, TN
+    
+    def recall_score(TP, FN):
+        return TP/(TP+FN)
+    
+    def precision_score(TP, FP):
+        return TP/(TP+FP)
+    
+    def FP_rate(FP, TN):
+        return  FP/(FP+TN)
+    
+    def specificity_score(TN, FP):
+        return TN/(TN+FP)
+    
+    def accuracy_score(m):
+        return np.sum(m.diagonal())/np.sum(m)
+    
+    def f1_score(self, TP, FP, FN):
+        if any(self.recall_score(TP, FN)+self.precision_score(TP, FP))==np.nan:
+            return 0
+        return 2*(self.recall_score(TP, FN)*self.precision_score(TP, FP))/(self.recall_score(TP, FN)+self.precision_score(TP, FP))
+
+class KNN:
+    def __init__(self,k,methode) -> None:
+        self.k = k
+        self.methode=methode
+    def fit(self,X_train,Y_train):
+        self.X_train=X_train
+        self.Y_train=Y_train    
+    def _predict(self,X_test):
+        dist =  np.apply_along_axis(lambda x: distance(x, X_test, self.methode), axis=1, arr=self.X_train)
+        ind = np.argsort(dist)
+        knn=self.Y_train[ind[:self.k]]
+        Y=statistics.mode(knn)
+        return Y
+
+class Node():
+    def __init__(self, feature_index=None, threshold=None, left=None, right=None, info_gain=None, value=None):
+        #desicion node
+        self.feature_index = feature_index
+        self.threshold = threshold
+        self.left = left
+        self.right = right
+        self.info_gain = info_gain
+        # leaf node
+        self.value = value
+
+class DecisionTreeClassifier():
+    def __init__(self, min_samples_split, max_depth, info_gain_method, n_features=None):
+        self.root = None
+        self.min_samples_split = min_samples_split
+        self.max_depth = max_depth
+        self.n_features = n_features
+        self.info_gain_method = info_gain_method
+        
+    def build_tree(self, dataset, curr_depth=0):
+        
+        X, Y = dataset[:,:-1], dataset[:,-1]
+        num_samples, num_features = np.shape(X)
+        
+        if num_samples>=self.min_samples_split and curr_depth<=self.max_depth: #stopping conditions + decision node
+            # find the best split
+            best_split = self.get_best_split(dataset, num_samples, num_features)
+            if best_split and best_split["info_gain"]>0:
+                left_subtree = self.build_tree(best_split["dataset_left"], curr_depth+1)
+                right_subtree = self.build_tree(best_split["dataset_right"], curr_depth+1)
+                
+                return Node(best_split["feature_index"], best_split["threshold"], 
+                            left_subtree, right_subtree, best_split["info_gain"])
+        
+        #leaf node
+        leaf_value = self.calculate_leaf_value(Y)
+        return Node(value=leaf_value)
+    
+    def get_best_split(self, dataset, num_samples, num_features):
+    
+        best_split = {}
+        max_info_gain = -float("inf")
+        
+        if self.n_features is not None:
+            feature_indices = np.random.choice(num_features, self.n_features, replace=False)
+        else:
+            feature_indices = range(num_features)
+        
+        for feature_index in feature_indices:
+            feature_values = dataset[:, feature_index]
+            possible_thresholds = np.unique(feature_values)
+            for threshold in possible_thresholds:
+                dataset_left, dataset_right = self.split(dataset, feature_index, threshold)
+                
+                if len(dataset_left) > 0 and len(dataset_right) > 0:
+                    y, left_y, right_y = dataset[:, -1], dataset_left[:, -1], dataset_right[:, -1]
+
+                    curr_info_gain = self.information_gain(y, left_y, right_y, self.info_gain_method)
+
+                    if curr_info_gain > max_info_gain:
+                        best_split["feature_index"] = feature_index
+                        best_split["threshold"] = threshold
+                        best_split["dataset_left"] = dataset_left
+                        best_split["dataset_right"] = dataset_right
+                        best_split["info_gain"] = curr_info_gain
+                        max_info_gain = curr_info_gain
+      
+        return best_split
+    
+    def split(self, dataset, feature_index, threshold):
+        
+        dataset_left = np.array([row for row in dataset if row[feature_index]<=threshold])
+        dataset_right = np.array([row for row in dataset if row[feature_index]>threshold])
+        return dataset_left, dataset_right
+    
+    def information_gain(self, parent, l_child, r_child, mode):
+        
+        weight_l = len(l_child) / len(parent)
+        weight_r = len(r_child) / len(parent)
+        if mode=="Gini":
+            gain = self.gini_index(parent) - (weight_l*self.gini_index(l_child) + weight_r*self.gini_index(r_child))
+        else:
+            gain = self.entropy(parent) - (weight_l*self.entropy(l_child) + weight_r*self.entropy(r_child))
+        return gain
+    
+    def entropy(self, y):
+        
+        class_labels = np.unique(y)
+        entropy = 0
+        for cls in class_labels:
+            p_cls = len(y[y == cls]) / len(y)
+            entropy += -p_cls * np.log2(p_cls)
+        return entropy
+    
+    def gini_index(self, y):
+        
+        class_labels = np.unique(y)
+        gini = 0
+        for cls in class_labels:
+            p_cls = len(y[y == cls]) / len(y)
+            gini += p_cls**2
+        return 1 - gini
+        
+    def calculate_leaf_value(self, Y):
+
+        Y = list(Y)
+        return max(Y, key=Y.count)
+    
+    def fit(self, X, Y):
+        
+        dataset = np.concatenate((X, Y), axis=1)
+        self.root = self.build_tree(dataset)
+    
+    def predict(self, X):
+        
+        preditions = [self.make_prediction(x, self.root) for x in X]
+        return preditions
+    
+    def make_prediction(self, x, tree):
+        
+        if tree.value!=None: return tree.value
+        feature_val = x[tree.feature_index]
+        if feature_val<=tree.threshold:
+            return self.make_prediction(x, tree.left)
+        else:
+            return self.make_prediction(x, tree.right)
+
+class RandomForestClassifier:
+    def __init__(self, n_trees, max_depth, min_samples_split, n_features, info_gain_method):
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.n_features = n_features
+        self.trees = []
+        self.info_gain_method = info_gain_method
+
+    def fit(self, X, Y):
+        for i in range(self.n_trees):
+            subset_indices = np.random.choice(len(X), len(X), replace=True)
+            subset_X = X[subset_indices, :]
+            subset_Y = Y[subset_indices]
+
+            tree = DecisionTreeClassifier(
+                min_samples_split=self.min_samples_split,
+                max_depth=self.max_depth,
+                n_features=self.n_features,
+                info_gain_method=self.info_gain_method
+            )
+            tree.fit(subset_X, subset_Y)
+
+            self.trees.append(tree) #add it to the forest
+
+    def predict(self, X):
+        tree_predictions = [tree.predict(X) for tree in self.trees]
+
+        #predict using majority voting 
+        predictions = np.array(tree_predictions).T.astype(int)
+        final_predictions = [np.argmax(np.bincount(prediction)) for prediction in predictions]
+
+        return final_predictions
+
 
 class App:
     def __init__(self):
@@ -691,6 +928,14 @@ class App:
         attr_desc.insert(0, 'Stats', attr_desc.index)
         return num_rows, num_cols, attr_desc
     
+    def preprocessing_general1(self, manque_meth, aberrante_meth, normalization_meth, vmin, vmax):
+        self.preprocessor1.remplacement_manquant_generale(manque_meth)
+        self.preprocessor1.remplacement_aberantes_generale(aberrante_meth)
+        self.preprocessor1.normalisation_generale(normalization_meth, int(vmin), int(vmax)) 
+        self.preprocessor1.reduire_dim(0.75)
+        self.dataset1 = self.preprocessor1.dataset
+        return self.dataset1
+
     def preprocessing_general2(self, manque_meth, aberrante_meth):
         for row in self.dataset2:
             row[3] = self.preprocessor2.convert_date(row[1], row[3])
@@ -887,6 +1132,105 @@ class App:
 
         return pd.DataFrame([r["consequent"] for r in r_filtered], columns=consequent_columns)
 
+    def train_test_split(self, dataset):
+        train = np.empty((0, dataset.shape[1]), dtype=dataset.dtype)
+        test = np.empty((0, dataset.shape[1]), dtype=dataset.dtype)
+
+        for i in set(dataset[:,-1]):
+            indices= np.where(dataset[:,-1]==i)
+            random.shuffle(indices)
+            indicesTrain=list(indices[0])[:int(len(indices[0])*0.8)]
+            indicesTest=list(indices[0])[int(len(indices[0])*0.8):]
+            train = np.vstack((train, dataset[indicesTrain, :]))
+            test = np.vstack((test, dataset[indicesTest, :]))
+
+        np.random.shuffle(train)
+        np.random.shuffle(test)
+
+        X_train=train[:,:-1]
+        Y_train=train[:,-1]
+        X_test= test[:,:-1]
+        Y_test= test[:,-1]
+
+        return X_train, Y_train, X_test, Y_test
+
+    def metric_value(metric, minkowski_param):
+        if metric == 'Euclidean':
+            metric = 2
+        if metric == 'Manhattan':
+            metric = 1
+        if metric == 'Minkowski':
+            metric = minkowski_param
+        if metric == 'Cosine':
+            metric = 0
+        return metric 
+    
+    def confusion_matrix_plot(m, model):
+        fig, ax = plt.subplots()  
+        sns.heatmap(m, annot=True, fmt="d", cmap="Blues", ax=ax)
+        plt.xlabel("Predicted Label")
+        plt.ylabel("True Label")
+        plt.title(f"Confusion Matrix {model}")
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png')
+        plt.close(fig)
+
+        with open(f"confusion_matrix_{model}.png", 'wb') as f:
+            f.write(buffer.getvalue())
+
+        return f"confusion_matrix_{model}.png"
+
+    def classification(self, model, metric, minkowski_param, knn_param, DT_param, RF_param, instance):
+        X_train, Y_train, X_test, Y_test =  self.train_test_split(self.dataset1)
+        self.ClassifierMetrics = ClassifierMetrics(Y_test, y_pred)
+
+        metric = self.metric_value(metric, minkowski_param)
+
+        if model == 'KNN':
+            KNNClassifier = KNN(knn_param[0], metric)
+            KNNClassifier.fit(X_train, Y_train) 
+            y_pred=[]
+            for i in X_test:
+                y_pred.append(KNNClassifier._predict(i))
+        
+            instance_class = KNNClassifier._predict(instance)
+            
+        confusion_matrix = self.ClassifierMetrics.confusion_matrix()
+        TP, FN, FP, TN = self.ClassifierMetrics.Values(confusion_matrix)
+        accuracy = self.ClassifierMetrics.accuracy_score(Y_test, y_pred)
+        recall = self.ClassifierMetrics.recall_score(TP, FN)
+        precision = self.ClassifierMetrics.precision_score(TP, FP)
+        FP_rate = self.ClassifierMetrics.FP_rate(FP, TN)
+        specificity = self.ClassifierMetrics.specificity_score(TN, FP)
+        f1_score = self.ClassifierMetrics.f1_score(TP, FN, FP)
+            
+        recall.append(np.mean(recall))
+        precision.append(np.mean(precision))
+        FP_rate.append(np.mean(FP_rate))
+        specificity.append(np.mean(specificity))
+        f1_score.append(np.mean(f1_score))
+
+        data = {
+            "Accuracy": accuracy,
+            "Recall": recall,
+            "Precision": precision,
+            "FP Rate": FP_rate,
+            "Specificity": specificity,
+            "F1 Score": f1_score
+        }
+
+        classification_report = pd.DataFrame(data)
+
+        class_labels = [f"Class_{i}" for i in range(len(recall))]
+        class_labels.append("Global")
+        classification_report["Class"] = class_labels
+
+        classification_report.set_index("Class", inplace=True)
+
+        conf_matrix_plot = self.confusion_matrix_plot(confusion_matrix, model)
+
+        return classification_report, instance_class, [conf_matrix_plot]
+
     def create_interface(self):
         with gr.Blocks() as demo:
             with gr.Tab("Agriculture"):
@@ -943,15 +1287,72 @@ class App:
 
                         with gr.Row():
                             gr.ClearButton(inputs)
-                            btn = gr.Button("Submit")
-                            btn.click(fn=self.preprocessor1.preprocessing_general1, inputs=inputs, outputs=outputs)
+                            dataset1_reprocessing_btn = gr.Button("Submit")
 
                 with gr.Tab("Classification"):
-                    gr.Markdown("hh")
+                    with gr.Tab("Dataset 1 Classification"):
+                        with gr.Column():
+                            
+                            with gr.Row():
+                                model = [gr.Dropdown(["KNN", "Decision Trees", "Random Forest"], multiselect=False, label="Model", info="Select a classification model :")] 
+                                metric = [gr.Dropdown(["Euclidean", "Manhattan", "Minkowski", "Cosine"], multiselect=False, label="Metric", info="Select a metric :")]
+                                minkowski_param = gr.Number(visible=False, value=3, minimum=1, maximum=10, step=1, label="Minkowski P parameter")
+
+                                with gr.Group(visible=False) as knn_param_row:
+                                    knn_param = [gr.Number(value=3, minimum=2, maximum=5, step=1, label="K")]
+
+                                with gr.Group(visible=False) as DT_param_row:
+                                    DT_param = [gr.Number(value=3, minimum=1, maximum=10, step=1, label="Minimum samples split"), 
+                                           gr.Number(value=3, minimum=2, maximum=10, step=1, label="Maximum depth"), 
+                                           gr.Dropdown(["Gini", "Entropy"], multiselect=False, label="Information gain metric", info="Select an information gain metric :")]
+                                
+                                with gr.Group(visible=False) as RF_param_row:
+                                    RF_param = [gr.Number(value=3, minimum=1, maximum=10, step=1, label="Minimum samples split"), 
+                                           gr.Number(value=3, minimum=2, maximum=12, step=1, label="Maximum depth"),
+                                           gr.Number(value=30, minimum=10, maximum=500, step=10, label="Number of trees"),
+                                           gr.Number(value=6, minimum=2, maximum=12, step=1, label="Number of features"),
+                                           gr.Dropdown(["Gini", "Entropy"], multiselect=False, label="Information gain metric", info="Select an information gain metric :")]
+                            with gr.Row():
+                                gr.Markdown(""" Insert an instance to predict its class :""")
+                                instance = [gr.Number(label=f"Attribute {i+1}") for i in range(12)]
+
+                            def update_visibility_model_param(selected_model):
+                                    if selected_model == "KNN":
+                                        return {knn_param_row: gr.Row(visible=True),
+                                                DT_param_row: gr.Row(visible=False),
+                                                RF_param_row: gr.Row(visible=False)}
+                                    if selected_model == "Decision Trees":
+                                        return {knn_param_row: gr.Row(visible=False),
+                                                DT_param_row: gr.Row(visible=True),
+                                                RF_param_row: gr.Row(visible=False)}
+                                    else:
+                                        return {knn_param_row: gr.Row(visible=False),
+                                                DT_param_row: gr.Row(visible=False),
+                                                RF_param_row: gr.Row(visible=True)}
+                            model[0].change(update_visibility_model_param, inputs=model[0], outputs=[knn_param_row, DT_param_row, RF_param_row])
+
+                            def update_visibility_minkowski_param(selected_metric):
+                                if selected_metric == "Minkowski":
+                                    return {minkowski_param: gr.Number(visible=True)}
+                                else:
+                                    return {minkowski_param: gr.Number(visible=False)}
+                            metric[0].change(update_visibility_minkowski_param, inputs=metric[0], outputs=minkowski_param)
+                           
+                            with gr.Row():
+                                with gr.Column():
+                                    instance_class = [gr.Textbox(label="Instance Class")]
+                                    classification_report = [gr.Dataframe(label="Metrics")]
+                                    
+                                with gr.Column():
+                                    classification_gallery = [gr.Gallery(label="Graphs", columns=(1,2))]
+                            
+                            btn = gr.Button("Train & Test")
+                            btn.click(fn=self.classification, inputs=model+metric+[minkowski_param]+knn_param+DT_param+RF_param+instance, outputs=classification_report+instance_class+classification_gallery)
+
                 with gr.Tab("Clustering"):
-                    gr.Markdown("hh")
-                with gr.Tab("Recommender"):
-                    gr.Markdown("hh")                   
+                    gr.Markdown("hh") 
+
+                dataset1_reprocessing_btn.click(fn=self.preprocessing_general1, inputs=inputs, outputs=outputs)               
 
             with gr.Tab("COVID-19"):
                 with gr.Tab("Dataset Visualization"):
