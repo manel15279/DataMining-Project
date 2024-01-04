@@ -128,10 +128,11 @@ class Preprocessing:
      
     def normalisation(self, methode, attribute, vmin, vmax):
         if methode=='Vmin-Vmax':
-            vminOld=self.dataset[:,attribute].min()
-            vmaxOld=self.dataset[:,attribute].max()
-            for  val in range(0,self.dataset[:,attribute].shape[0]):
-                self.dataset[val,attribute]=vmin+(vmax-vmin)*((self.dataset[val,attribute]-vminOld)/(vmaxOld-vminOld))
+            vminOld=float(self.dataset[:,attribute].min())
+            vmaxOld=float(self.dataset[:,attribute].max())
+            for val in range(0,self.dataset[:,attribute].shape[0]):
+                self.dataset[val,attribute]=vmin+(vmax-vmin)*((float(self.dataset[val,attribute])-vminOld)/(vmaxOld-vminOld))
+
         else:
             vmean=np.mean(self.dataset[:,attribute])
             s=np.mean( (self.dataset[:,attribute]  -vmean)**2)
@@ -154,9 +155,14 @@ class Preprocessing:
         for i in range(0,self.dataset.shape[1]-1):
             for j in range(i+1,self.dataset.shape[1]):
                 if (np.abs(self.coef_correl(i,j))>treashold):
-                    print(i,j)
                     to_delete.append(i)
+        print("to delete:" , to_delete)
         self.dataset = np.delete(self.dataset,to_delete, axis=1)
+        valid_indices = [col for col in to_delete if col < len(self.dataFrame.columns)]
+        self.dataFrame = self.dataFrame.drop(self.dataFrame.columns[valid_indices], axis=1)
+
+    def reduire_row(self):
+        self.dataset= np.unique(self.dataset, axis=0, return_index=False)
     
     #===============================DATASET2================================================================================================================================================================================================================================
     def year_mapping(self, time_period):
@@ -695,34 +701,36 @@ class ClassifierMetrics:
         self.Y_test = Y_test
         self.y_pred = y_pred
     
-    def confusion_matrix(self):
-        N = len(np.unique(self.Y_test)) 
+    def confusion_matrix(self, Y_test, y_pred):
+        Y_test = np.array(Y_test).flatten()
+        y_pred = np.array(y_pred).flatten()
+        N = len(np.unique(Y_test)) 
         M= np.zeros((N,N),dtype=int)
-        for i in range(0,self.Y_test.shape[0]) : 
-            M[int(self.Y_test[i])][int(self.y_pred[i])] += 1 
+        for i in range(0,Y_test.shape[0]) : 
+            M[int(Y_test[i])][int(y_pred[i])] += 1 
 
         return M
 
-    def Values(m):
+    def Values(self, m):
         TP= m.diagonal()
         FP = m.sum(axis=0) - TP
         FN = m.sum(axis=1) - TP
         TN =  m.sum() - (TP + FN + FP)
         return TP, FN, FP, TN
     
-    def recall_score(TP, FN):
+    def recall_score(self, TP, FN):
         return TP/(TP+FN)
     
-    def precision_score(TP, FP):
+    def precision_score(self, TP, FP):
         return TP/(TP+FP)
     
-    def FP_rate(FP, TN):
+    def FP_rate(self, FP, TN):
         return  FP/(FP+TN)
     
-    def specificity_score(TN, FP):
+    def specificity_score(self, TN, FP):
         return TN/(TN+FP)
     
-    def accuracy_score(m):
+    def accuracy_score(self, m):
         return np.sum(m.diagonal())/np.sum(m)
     
     def f1_score(self, TP, FP, FN):
@@ -739,6 +747,7 @@ class KNN:
         self.Y_train=Y_train    
     def _predict(self,X_test):
         dist =  np.apply_along_axis(lambda x: distance(x, X_test, self.methode), axis=1, arr=self.X_train)
+        print("X_test:", X_test)
         ind = np.argsort(dist)
         knn=self.Y_train[ind[:self.k]]
         Y=statistics.mode(knn)
@@ -905,11 +914,115 @@ class RandomForestClassifier:
 
         return final_predictions
 
+class K_MEANS:
+    def __init__(self,k,methode_d,methode_c,max_iterations, dataset) -> None:
+        self.k = k
+        self.centroid=[]
+        self.dataset_letiqu = np.hstack((dataset[:,:].copy(), -1*np.ones((dataset[:,:].shape[0], 1))))
+        self.methode_c=methode_c
+        self.methode_d=methode_d
+        self.max_iterations=max_iterations
+    def fit(self,xt):
+        self.Xtrain=xt
+    def centroid_selection(self,methode):
+        if methode=="Random":#random sans prendre le meme
+            self.centroid.extend(self.Xtrain[random.sample(range(self.Xtrain.shape[0]), self.k),:])   
+        elif methode=="Better picking":#better picking
+            self.centroid.append(list(self.Xtrain[np.random.choice(self.Xtrain.shape[0]),:]))
+            dist =  np.apply_along_axis(lambda x: distance(x, self.centroid[0], self.methode_d), axis=1, arr=self.Xtrain)
+            ind = np.argsort(dist)
+            for i in range(self.k,0,-1):
+                self.centroid.append(list(self.Xtrain[ind[int((len(ind)/self.k)*i )-1],:]))
+    
+    def _cluster(self):#instance
+        #choose centroid 
+        self.centroid_selection(self.methode_c)  
+        #boucle
+        change=True
+        nbr_iteration=0
+        while(change):
+        #distance
+            for j in range(self.Xtrain.shape[0]):
+                distances=[]
+                for i in range(self.k):
+                    distances.append(distance(instance1= self.centroid[i], instance2= self.Xtrain[j,:] ,methode=self.methode_d))
+                #affectation
+                c =np.argmin(distances)
+                self.dataset_letiqu[j,-1]=c
+            #maj centroid
+            oldcentroid=self.centroid.copy()
+            for i in range(self.k):
+                cluster=np.array([row[:-1] for row in self.dataset_letiqu if row[-1]==i])
+                self.centroid[i]=np.array([np.average(cluster[:,j]) for j in range(cluster.shape[1])] )
+
+            if np.linalg.norm(np.array(self.centroid) - np.array(oldcentroid)) < 0.0001 or nbr_iteration>self.max_iterations:
+                change=False
+            nbr_iteration+=1
+        print(nbr_iteration)
+        return self.dataset_letiqu
+    #bonus
+    def _prediction(self,instance):
+        distances=[]
+        for i in range(self.k):
+            distances.append(distance(self.centroid[i],instance,self.methode_d ))
+        return np.argmin(distances),np.array([row[:-1] for row in self.dataset_letiqu if row[-1]==np.argmin(distances)])
+
+class ClusteringMetrics:
+    def __init__(self, dataset, y_pred):
+        self.dataset = dataset
+        self.y_pred = y_pred
+    
+    def silhouette_score(data, labels, metric):
+        num_points = len(data)
+        unique_labels = np.unique(labels)
+        silhouette_values = np.zeros(num_points)
+
+        intra_cluster_distances = np.zeros(num_points)
+        inter_cluster_distances = np.zeros(num_points)
+
+        for i in range(num_points):
+            #ai
+            label_i = labels[i]
+            cluster_i_indices = np.where(labels == label_i)[0] # get own cluster points
+            if len(cluster_i_indices) == 1:
+                silhouette_i = 0  # Set silhouette score to 0 for single point clusters
+            else:
+                a_i = np.mean([distance(data[i],data[j],metric) for j in cluster_i_indices if j != i])
+                inter_cluster_distances[i] = a_i
+
+                #bi
+                b_i_values = []
+                for label_j in unique_labels:
+                    if label_j != label_i:
+                        cluster_j_indices = np.where(labels == label_j)[0] # get neighbor clusters points
+                        b_ij = np.mean([distance(data[i], data[j], metric) for j in cluster_j_indices])
+                        b_i_values.append(b_ij)
+                
+                # get the average distance to the nearest neighbor cluster bi
+                b_i = min(b_i_values) if b_i_values else 0
+                intra_cluster_distances[i] = b_i
+
+                # silhouette score of the point i
+                silhouette_i = (b_i - a_i) / max(a_i, b_i)
+                
+            silhouette_values[i] = silhouette_i
+                
+        # silhouette score of data
+        silhouette_score_avg = np.mean(silhouette_values)
+        
+        # Calculate overall intra-cluster and inter-cluster distances
+        intra_distance = np.sum(intra_cluster_distances)
+        inter_distance = np.sum(inter_cluster_distances)
+
+        return silhouette_score_avg, intra_distance, inter_distance
+
+
 
 class App:
     def __init__(self):
         self.dataFrame1 = pd.read_csv('Dataset1.csv')
         self.dataset1 = np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1)
+        self.dataset11 = (np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1))[:,:-1]
         self.attribute_analyzer = AttributeAnalyzer(self.dataset1, self.dataFrame1)
         self.preprocessor1 = Preprocessing(self.dataset1, self.dataFrame1)
         self.dataFrame2 = pd.read_csv('Dataset2.csv')
@@ -931,11 +1044,18 @@ class App:
     def preprocessing_general1(self, manque_meth, aberrante_meth, normalization_meth, vmin, vmax):
         self.preprocessor1.remplacement_manquant_generale(manque_meth)
         self.preprocessor1.remplacement_aberantes_generale(aberrante_meth)
-        self.preprocessor1.normalisation_generale(normalization_meth, int(vmin), int(vmax)) 
+        self.preprocessor1.normalisation_generale(normalization_meth, int(vmin), int(vmax))
+        self.preprocessor1.reduire_row() 
         self.preprocessor1.reduire_dim(0.75)
         self.dataset1 = self.preprocessor1.dataset
-        return self.dataset1
-
+        self.dataFrame1 = self.preprocessor1.dataFrame
+        self.vmin = vmin
+        self.vmax = vmax
+        self.manque_meth = manque_meth
+        self.aberrante_meth = aberrante_meth
+        self.normalization_meth = normalization_meth
+        return pd.DataFrame(self.dataset1, columns=[col for col in self.dataFrame1.columns.tolist()])
+    
     def preprocessing_general2(self, manque_meth, aberrante_meth):
         for row in self.dataset2:
             row[3] = self.preprocessor2.convert_date(row[1], row[3])
@@ -1132,29 +1252,26 @@ class App:
 
         return pd.DataFrame([r["consequent"] for r in r_filtered], columns=consequent_columns)
 
-    def train_test_split(self, dataset):
-        train = np.empty((0, dataset.shape[1]), dtype=dataset.dtype)
-        test = np.empty((0, dataset.shape[1]), dtype=dataset.dtype)
+    def train_test_split(self, X, y, test_size=0.2, random_state=None):
+        if random_state is not None:
+            random.seed(random_state)
 
-        for i in set(dataset[:,-1]):
-            indices= np.where(dataset[:,-1]==i)
-            random.shuffle(indices)
-            indicesTrain=list(indices[0])[:int(len(indices[0])*0.8)]
-            indicesTest=list(indices[0])[int(len(indices[0])*0.8):]
-            train = np.vstack((train, dataset[indicesTrain, :]))
-            test = np.vstack((test, dataset[indicesTest, :]))
+        data = list(zip(X, y))
+        random.shuffle(data)
 
-        np.random.shuffle(train)
-        np.random.shuffle(test)
+        split_index = int(len(data) * (1 - test_size))
 
-        X_train=train[:,:-1]
-        Y_train=train[:,-1]
-        X_test= test[:,:-1]
-        Y_test= test[:,-1]
+        train_data = data[:split_index]
+        test_data = data[split_index:]
 
-        return X_train, Y_train, X_test, Y_test
+        X_train, y_train = zip(*train_data)
+        X_test, y_test = zip(*test_data)
 
-    def metric_value(metric, minkowski_param):
+        X_train, X_test, y_train, y_test = np.array(X_train), np.array(X_test), np.array(y_train), np.array(y_test)
+
+        return X_train, X_test, y_train, y_test
+
+    def metric_value(self, metric, minkowski_param):
         if metric == 'Euclidean':
             metric = 2
         if metric == 'Manhattan':
@@ -1165,7 +1282,7 @@ class App:
             metric = 0
         return metric 
     
-    def confusion_matrix_plot(m, model):
+    def confusion_matrix_plot(self, m, model):
         fig, ax = plt.subplots()  
         sns.heatmap(m, annot=True, fmt="d", cmap="Blues", ax=ax)
         plt.xlabel("Predicted Label")
@@ -1180,29 +1297,65 @@ class App:
 
         return f"confusion_matrix_{model}.png"
 
-    def classification(self, model, metric, minkowski_param, knn_param, DT_param, RF_param, instance):
-        X_train, Y_train, X_test, Y_test =  self.train_test_split(self.dataset1)
-        self.ClassifierMetrics = ClassifierMetrics(Y_test, y_pred)
+    def clustering_plots(self, component1, component2, result):
+        plt.scatter(component1, component2, c=result, cmap='cividis', marker='H', edgecolors='k')
+        plt.title('Clustering with PCA')
+        plt.xlabel('component 1 of PCA')
+        plt.ylabel('componant 2 of PCA')
 
-        metric = self.metric_value(metric, minkowski_param)
+    def classification(self, model, metric, minkowski_param, knn_param, min_samples_split_DT, max_depth_DT, info_gain_metric_DT, min_samples_split_RF, max_depth_RF, nbr_trees_RF, nbr_features_RF, info_gain_metric_RF, instance):
+        X_train, Y_train, X_test, Y_test =  self.train_test_split(self.dataset1[:, :-1], self.dataset1[:, -1], test_size=0.2, random_state=42)
+        print("ins",instance)
+        print('##################################### DATASET1#################################', self.dataset1)
+        instance = np.array([[float(item) for item in inner_list] for inner_list in instance])
+        dt1 = np.vstack([self.dataset11, instance])
+        self.dataset11 = dt1
+    
+        print("ins",instance)
+
+        metric = self.metric_value(metric, int(minkowski_param))
+        print(self.dataset11.shape[1])
+
+        self.preprocessor_instance = Preprocessing(self.dataset11, pd.DataFrame(self.dataset11))
+        self.preprocessor_instance.remplacement_manquant_generale(self.manque_meth)
+        self.preprocessor_instance.remplacement_aberantes_generale(self.aberrante_meth)
+        self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
+        self.preprocessor_instance.reduire_row()
+        self.preprocessor_instance.reduire_dim(0.75)
+        dataset = self.preprocessor_instance.dataset
+        instance = dataset[-1]
+        print("ins",instance)
 
         if model == 'KNN':
-            KNNClassifier = KNN(knn_param[0], metric)
+            KNNClassifier = KNN(int(knn_param), metric)
             KNNClassifier.fit(X_train, Y_train) 
             y_pred=[]
             for i in X_test:
                 y_pred.append(KNNClassifier._predict(i))
+            print("*********************************** instance *******************************************")
+            y_instance=(KNNClassifier._predict(instance))
+
+        if model == 'Decision Trees':
+            DTClassifier = DecisionTreeClassifier(min_samples_split=min_samples_split_DT, max_depth=max_depth_DT, info_gain_method=info_gain_metric_DT)
+            DTClassifier.fit(X_train, Y_train)
+            y_pred = DTClassifier.predict(X_test)
+
+        if model == 'Random Forest':
+            random_forest = RandomForestClassifier(n_trees=nbr_trees_RF, max_depth=max_depth_RF, min_samples_split=min_samples_split_RF, n_features=nbr_features_RF, info_gain_method=info_gain_metric_RF)
+            random_forest.fit(X_train, Y_train)
+            y_pred = random_forest.predict(X_test) 
+
+        self.ClassifierMetrics = ClassifierMetrics(Y_test, y_pred)
         
-            instance_class = KNNClassifier._predict(instance)
-            
-        confusion_matrix = self.ClassifierMetrics.confusion_matrix()
+        confusion_matrix = self.ClassifierMetrics.confusion_matrix(Y_test, y_pred)
+        print("confusion_matrix:",confusion_matrix)
         TP, FN, FP, TN = self.ClassifierMetrics.Values(confusion_matrix)
-        accuracy = self.ClassifierMetrics.accuracy_score(Y_test, y_pred)
-        recall = self.ClassifierMetrics.recall_score(TP, FN)
-        precision = self.ClassifierMetrics.precision_score(TP, FP)
-        FP_rate = self.ClassifierMetrics.FP_rate(FP, TN)
-        specificity = self.ClassifierMetrics.specificity_score(TN, FP)
-        f1_score = self.ClassifierMetrics.f1_score(TP, FN, FP)
+        accuracy = self.ClassifierMetrics.accuracy_score(confusion_matrix)
+        recall = self.ClassifierMetrics.recall_score(TP, FN).tolist()
+        precision = self.ClassifierMetrics.precision_score(TP, FP).tolist()
+        FP_rate = self.ClassifierMetrics.FP_rate(FP, TN).tolist()
+        specificity = self.ClassifierMetrics.specificity_score(TN, FP).tolist()
+        f1_score = self.ClassifierMetrics.f1_score(TP, FP, FN).tolist()
             
         recall.append(np.mean(recall))
         precision.append(np.mean(precision))
@@ -1221,7 +1374,7 @@ class App:
 
         classification_report = pd.DataFrame(data)
 
-        class_labels = [f"Class_{i}" for i in range(len(recall))]
+        class_labels = [f"Class_{i}" for i in range(len(recall)-1)]
         class_labels.append("Global")
         classification_report["Class"] = class_labels
 
@@ -1229,7 +1382,55 @@ class App:
 
         conf_matrix_plot = self.confusion_matrix_plot(confusion_matrix, model)
 
-        return classification_report, instance_class, [conf_matrix_plot]
+        return classification_report, y_instance, [conf_matrix_plot]
+
+    def clustering(self,  model, metric, minkowski_param, n_cluster_km, centroid_select_method_km, max_iterations_km, min_samples_db, radius_db, PCA):
+        metric = self.metric_value(metric, int(minkowski_param))
+        clustering_dataset = self.dataset1[:, :-1]
+        if PCA == "Yes":
+            pca = PCA(n_components=2)
+            clustering_dataset = pca.fit_transform(clustering_dataset)
+        else:
+            pca = None
+
+        if model == 'K-Means':
+            instance = np.array([[float(item) for item in inner_list] for inner_list in instance])
+            dt1 = np.vstack([self.dataset11, instance])
+            self.dataset11 = dt1
+            print("ins",instance)
+
+            self.preprocessor_instance = Preprocessing(self.dataset11, pd.DataFrame(self.dataset11))
+            self.preprocessor_instance.remplacement_manquant_generale(self.manque_meth)
+            self.preprocessor_instance.remplacement_aberantes_generale(self.aberrante_meth)
+            self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
+            self.preprocessor_instance.reduire_row()
+            self.preprocessor_instance.reduire_dim(0.75)
+            dataset = self.preprocessor_instance.dataset
+            instance = dataset[-1]
+            print("ins",instance)
+
+            kmeansClassifier = K_MEANS(k=n_cluster_km,methode_d=metric,methode_c=centroid_select_method_km,max_iterations=max_iterations_km, dataset=clustering_dataset)#k=2, pca=2, methode_d2 methode_c 1 3000 800
+            kmeansClassifier.fit(clustering_dataset)
+            res=kmeansClassifier._cluster()
+            prediction=kmeansClassifier._prediction(instance.tolist())
+            print('Prediction of instance kmeans :',prediction)
+
+        self.ClusteringMetrics = ClusteringMetrics(dataset, res)
+        silhouette_score, intra_distance, inter_distance = self.ClusteringMetrics.silhouette_score(clustering_dataset, res[:,-1], metric)
+        print("Silhouette Score :", silhouette_score)
+        print("intra distance = ", intra_distance)
+        print("inter distance = ", inter_distance)
+
+        if PCA=="Yes":
+            plot1 = plt.figure()
+            self.clustering_plots(clustering_dataset[:, 0], clustering_dataset[:, 1], res[:, -1])
+            plot1.savefig("clustering_PCA.png")
+            plt.close(plot1)
+            plot = ["clustering_PCA.png"]
+        
+        
+
+
 
     def create_interface(self):
         with gr.Blocks() as demo:
@@ -1283,7 +1484,7 @@ class App:
                                 gr.Textbox(label="Vmax", visible=True, interactive=True, value=0)]
                             
                         with gr.Row():
-                            outputs = [gr.Dataframe(label="Dataset1 preprocessed", headers=self.dataFrame1.columns.tolist())]
+                            outputs = [gr.Dataframe(label="Dataset1 preprocessed")]
 
                         with gr.Row():
                             gr.ClearButton(inputs)
@@ -1312,9 +1513,9 @@ class App:
                                            gr.Number(value=30, minimum=10, maximum=500, step=10, label="Number of trees"),
                                            gr.Number(value=6, minimum=2, maximum=12, step=1, label="Number of features"),
                                            gr.Dropdown(["Gini", "Entropy"], multiselect=False, label="Information gain metric", info="Select an information gain metric :")]
-                            with gr.Row():
+                            with gr.Column():
                                 gr.Markdown(""" Insert an instance to predict its class :""")
-                                instance = [gr.Number(label=f"Attribute {i+1}") for i in range(12)]
+                                instance = [gr.List(col_count=13)]
 
                             def update_visibility_model_param(selected_model):
                                     if selected_model == "KNN":
@@ -1350,7 +1551,55 @@ class App:
                             btn.click(fn=self.classification, inputs=model+metric+[minkowski_param]+knn_param+DT_param+RF_param+instance, outputs=classification_report+instance_class+classification_gallery)
 
                 with gr.Tab("Clustering"):
-                    gr.Markdown("hh") 
+                    with gr.Tab("Dataset 1 Clustering"):
+                        with gr.Column():
+                            
+                            with gr.Row():
+                                model_clustering = [gr.Dropdown(["DBSCAN", "K-Means"], multiselect=False, label="Model", info="Select a clustering model :")] 
+                                metric_clustering = [gr.Dropdown(["Euclidean", "Manhattan", "Minkowski", "Cosine"], multiselect=False, label="Metric", info="Select a metric :")]
+                                minkowski_param_clustering = gr.Number(visible=False, value=3, minimum=1, maximum=10, step=1, label="Minkowski P parameter")
+
+                                with gr.Group(visible=False) as KMeans_param_row:
+                                    KMeans_param = [gr.Number(value=3, minimum=2, maximum=5, step=1, label="K (Number of clusters)"),
+                                                     gr.Dropdown(["Random", "Better picking"], multiselect=False, label="Centroids Selection Methods", info="Choose a method to select the centroids :"),
+                                                     gr.Number(value=3000, minimum=100, maximum=10000, step=100, label="Maximum Iterations")]
+
+                                with gr.Group(visible=False) as DBSCAN_param_row:
+                                    DBSCAN_param = [gr.Number(value=20, minimum=5, maximum=50, step=5, label="Minimum samples"), 
+                                           gr.Number(value=0.8, minimum=0.1, maximum=2.0, step=0.1, label="Radius")]
+                                
+                                PCA = gr.Radio(['Yes', 'No'], label="PCA")
+
+                                
+                            clustering_instance = [gr.List(visible=False, col_count=13, label="Insert an instance to predict its cluster :")]
+
+                            def update_visibility_model_param(selected_model):
+                                    if selected_model == "DBSCAN":
+                                        return {DBSCAN_param_row: gr.Group(visible=True),
+                                                KMeans_param_row: gr.Group(visible=False), 
+                                                clustering_instance: gr.List(visible=False), 
+                                                instance_cluster : gr.Textbox(visible=False)}
+                                    else:
+                                        return {DBSCAN_param_row: gr.Group(visible=False),
+                                                KMeans_param_row: gr.Group(visible=True), 
+                                                clustering_instance: gr.List(visible=True), 
+                                                instance_cluster : gr.Textbox(visible=True)}
+                                    
+                            metric_clustering[0].change(update_visibility_minkowski_param, inputs=metric_clustering[0], outputs=minkowski_param_clustering)
+                           
+                            with gr.Row():
+                                with gr.Column():
+                                    instance_cluster = [gr.Textbox(visible=False, label="Instance Cluster")]
+                                    clustering_report = [gr.Dataframe(label="Metrics")]
+                                    
+                                with gr.Column():
+                                    clustering_gallery = [gr.Gallery(label="Graphs", columns=(1,2))]
+
+                            model_clustering[0].change(update_visibility_model_param, inputs=model_clustering[0], outputs=[DBSCAN_param_row, KMeans_param_row, clustering_instance, instance_cluster])
+                            
+                            btn = gr.Button("Train")
+                            btn.click(fn=self.clustering, inputs=model_clustering+metric_clustering+KMeans_param+DBSCAN_param+PCA, outputs=clustering_report+clustering_gallery)
+
 
                 dataset1_reprocessing_btn.click(fn=self.preprocessing_general1, inputs=inputs, outputs=outputs)               
 
