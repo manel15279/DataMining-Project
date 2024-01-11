@@ -27,6 +27,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import Delaunay
 import psutil
 import io
+from sklearn.decomposition import PCA
 
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("Set2")
@@ -38,8 +39,7 @@ class Preprocessing:
         self.dataFrame = dataFrame   
         numeric_columns = self.dataFrame.select_dtypes(include=['int', 'float']).columns.tolist() # column label
         self.numeric_columns = [self.dataFrame.columns.get_loc(col) for col in numeric_columns]
-    
-
+  
     def val_manquante(self, attribute):
         L=[]
         for i in range(0,len(self.dataset[:,attribute])):
@@ -146,7 +146,6 @@ class Preprocessing:
     def reduire_row(self):
         self.dataset= np.unique(self.dataset, axis=0, return_index=False)
     
-
     def coef_correl(self, attribut1,attribut2):
         moy1=np.mean(self.dataset[:,attribut1])
         moy2=np.mean(self.dataset[:,attribut2])
@@ -912,8 +911,7 @@ class DtClassifier:
             return self.make_prediction(x, tree.left)
         else:
             return self.make_prediction(x, tree.right)
-        
-        
+              
 class RandomForestClassifier:
     def __init__(self, n_trees, max_depth, min_samples_split, n_features, info_gain_method):
         self.n_trees = n_trees
@@ -998,8 +996,9 @@ class K_MEANS:
     #bonus
     def _prediction(self,instance):
         distances=[]
+        print("centroids array: ", self.centroid)
         for i in range(self.k):
-            distances.append(distance(self.centroid[i],instance,self.methode_d ))
+            distances.append(distance(self.centroid[i],instance,self.methode_d))
         return np.argmin(distances),np.array([row[:-1] for row in self.dataset_letiqu if row[-1]==np.argmin(distances)])
 
 class ClusteringMetrics:
@@ -1007,7 +1006,7 @@ class ClusteringMetrics:
         self.dataset = dataset
         self.y_pred = y_pred
     
-    def silhouette_score(data, labels, metric):
+    def silhouette_score(self, data, labels, metric):
         num_points = len(data)
         unique_labels = np.unique(labels)
         silhouette_values = np.zeros(num_points)
@@ -1405,7 +1404,6 @@ class App:
         self.preprocessor_instance.reduire_row()
         self.preprocessor_instance.reduire_dim(0.75)
         dataset = self.preprocessor_instance.dataset
-        print('#########################',dataset.shape)
         instance = dataset[-1]
         print(instance)
 
@@ -1467,60 +1465,61 @@ class App:
 
         return classification_report, y_instance, [conf_matrix_plot]
 
-    def clustering(self,  model, metric, minkowski_param, n_cluster_km, centroid_select_method_km, max_iterations_km, min_samples_db, radius_db, instance, PCA):
+    def clustering(self, model, metric, minkowski_param, n_cluster_km, centroid_select_method_km, max_iterations_km, min_samples_db, radius_db, pca_clust, instance):
         metric = self.metric_value(metric, int(minkowski_param))
         dataset = self.dataset1[:, :-1]
         prediction = None
-        if PCA == "Yes":
+        if pca_clust == "Yes":
             pca = PCA(n_components=2)
             dataset = pca.fit_transform(dataset)
         else:
             pca = None
-
+            plot = None
         if model == 'K-Means':
             instance = np.array([[float(item) for item in inner_list] for inner_list in instance])
             dt1 = np.vstack([self.dataset11, instance])
-            self.dataset11 = dt1
 
-            self.preprocessor_instance = Preprocessing(self.dataset11, pd.DataFrame(self.dataset11))
+            self.preprocessor_instance = Preprocessing(dt1, pd.DataFrame(dt1))
             self.preprocessor_instance.remplacement_manquant_generale(self.manque_meth)
             self.preprocessor_instance.remplacement_aberantes_generale(self.aberrante_meth)
             self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
             self.preprocessor_instance.reduire_row()
             self.preprocessor_instance.reduire_dim(0.75)
-            dataset = self.preprocessor_instance.dataset
-            instance = dataset[-1]
+            dt1 = self.preprocessor_instance.dataset
+            if pca_clust == 'Yes':
+                dt1 = pca.fit_transform(dt1)
+            instance = dt1[-1]
 
-            kmeansClustering = K_MEANS(k=n_cluster_km,methode_d=metric,methode_c=centroid_select_method_km,max_iterations=max_iterations_km, dataset=dataset)#k=2, pca=2, methode_d2 methode_c 1 3000 800
+            kmeansClustering = K_MEANS(k=int(n_cluster_km),methode_d=metric,methode_c=centroid_select_method_km,max_iterations=max_iterations_km, dataset=dataset)#k=2, pca=2, methode_d2 methode_c 1 3000 800
             kmeansClustering.fit(dataset)
-            clustering_dataset = self.dataset1
-            res=kmeansClustering._cluster()[:,-1]
-            prediction=kmeansClustering._prediction(instance.tolist())
-            labeled_dataset = pd.DataFrame(res, columns=[f"feature_{i+1}" for i in range(self.dataset1.shape[1])] + ["cluster_label"])
+            res=kmeansClustering._cluster()[:, -1]
+            km_labeled_dataset = np.concatenate((self.dataset1[:, :-1], res.reshape(-1, 1)), axis=1)
+            prediction=kmeansClustering._prediction(instance.tolist())[0]
+            labeled_dataset = pd.DataFrame(km_labeled_dataset, columns=[f"feature_{i+1}" for i in range((km_labeled_dataset.shape[1])-1)] + ["cluster_label"])
 
         else:
-            DBSCANClustering=DB_Scan(radius_db, min_samples_db, methode_d=metric, dataset=clustering_dataset)# 1.2 5 0.45  1/0/1
-            clustering_dataset = np.array(DBSCANClustering[0])
-            res = DBSCANClustering[1]
-            labeled_dataset = pd.DataFrame(res, columns=[f"feature_{i+1}" for i in range(len(res[0]))])
-            labeled_dataset["cluster_label"] = clustering_dataset[-1] 
+            DBSCANClustering=DB_Scan(radius_db, min_samples_db, methode_d=metric, dataset=dataset)# 1.2 5 0.45  1/0/1
+            res = np.array(DBSCANClustering[1])
 
+            DBSCAN_labeled_dataset = np.concatenate((self.dataset1[:, :-1], res.reshape(-1, 1)), axis=1)
+            labeled_dataset = pd.DataFrame(DBSCAN_labeled_dataset, columns=[f"feature_{i+1}" for i in range((DBSCAN_labeled_dataset.shape[1])-1)] + ["cluster_label"])
+            
         self.ClusteringMetrics = ClusteringMetrics(dataset, res)
-        silhouette_score, intra_distance, inter_distance = self.ClusteringMetrics.silhouette_score(clustering_dataset, res, metric)
+        silhouette_score, intra_distance, inter_distance = self.ClusteringMetrics.silhouette_score(dataset, res, metric)
 
 
-        if PCA=="Yes":
+        if pca_clust=="Yes":
             plot1 = plt.figure()
-            self.clustering_plots(clustering_dataset[:, 0], clustering_dataset[:, 1], res)
+            self.clustering_plots(dataset[:, 0], dataset[:, 1], res)
             plot1.savefig("clustering_PCA.png")
             plt.close(plot1)
             plot = ["clustering_PCA.png"]
 
         data = {
-            "Silhouette": silhouette_score,
-            "Intra Cluster Distance": intra_distance,
-            "Inter Cluster Distance": inter_distance
-            }
+            "Silhouette": [silhouette_score],
+            "Intra Cluster Distance": [intra_distance],
+            "Inter Cluster Distance": [inter_distance]
+        }
 
         clustering_report = pd.DataFrame(data)
 
@@ -1598,13 +1597,13 @@ class App:
                                     knn_param = [gr.Number(value=3, minimum=2, maximum=5, step=1, label="K")]
 
                                 with gr.Row(visible=False) as DT_param_row:
-                                    DT_param = [gr.Number(value=3, minimum=1, maximum=10, step=1, label="Minimum samples split"), 
-                                           gr.Number(value=3, minimum=2, maximum=10, step=1, label="Maximum depth"), 
+                                    DT_param = [gr.Number(value=2, minimum=1, maximum=10, step=1, label="Minimum samples split"), 
+                                           gr.Number(value=5, minimum=2, maximum=10, step=1, label="Maximum depth"), 
                                            gr.Dropdown(["Gini", "Entropy"], multiselect=False, label="Information gain metric", info="Select an information gain metric :")]
                                 
                                 with gr.Row(visible=False) as RF_param_row:
-                                    RF_param = [gr.Number(value=3, minimum=1, maximum=10, step=1, label="Minimum samples split"), 
-                                           gr.Number(value=3, minimum=2, maximum=12, step=1, label="Maximum depth"),
+                                    RF_param = [gr.Number(value=2, minimum=1, maximum=10, step=1, label="Minimum samples split"), 
+                                           gr.Number(value=6, minimum=2, maximum=12, step=1, label="Maximum depth"),
                                            gr.Number(value=30, minimum=10, maximum=500, step=10, label="Number of trees"),
                                            gr.Number(value=6, minimum=2, maximum=12, step=1, label="Number of features"),
                                            gr.Dropdown(["Gini", "Entropy"], multiselect=False, label="Information gain metric", info="Select an information gain metric :")]
@@ -1660,10 +1659,10 @@ class App:
                                                      gr.Number(value=3000, minimum=100, maximum=10000, step=100, label="Maximum Iterations")]
 
                                 with gr.Row(visible=False) as DBSCAN_param_row:
-                                    DBSCAN_param = [gr.Number(value=20, minimum=5, maximum=50, step=5, label="Minimum samples"), 
-                                           gr.Number(value=0.8, minimum=0.1, maximum=2.0, step=0.1, label="Radius")]
+                                    DBSCAN_param = [gr.Number(value=5, minimum=5, maximum=50, step=5, label="Minimum samples"), 
+                                           gr.Number(value=1.2, minimum=0.1, maximum=3.0, step=0.1, label="Radius")]
                                 
-                                PCA = [gr.Radio(['Yes', 'No'], label="PCA")]
+                                pca = [gr.Radio(['Yes', 'No'], label="PCA")]
 
                             with gr.Row(visible=False) as clustering_instance_row:
                                 clustering_instance = [gr.List(col_count=13, label="Insert an instance to predict its cluster :")]
@@ -1695,7 +1694,7 @@ class App:
                             model_clustering[0].change(update_visibility_model_param, inputs=model_clustering[0], outputs=[DBSCAN_param_row, KMeans_param_row, clustering_instance_row, instance_cluster_row])
                             
                             btn = gr.Button("Train")
-                            btn.click(fn=self.clustering, inputs=model_clustering+metric_clustering+KMeans_param+DBSCAN_param+clustering_instance+PCA, outputs=labeled_dataset+clustering_report+instance_cluster+clustering_gallery)
+                            btn.click(fn=self.clustering, inputs=model_clustering+metric_clustering+[minkowski_param_clustering]+KMeans_param+DBSCAN_param+pca+clustering_instance, outputs=labeled_dataset+clustering_report+instance_cluster+clustering_gallery)
                
 
             with gr.Tab("COVID-19"):
