@@ -1493,7 +1493,9 @@ class App:
 
             kmeansClustering = K_MEANS(k=int(n_cluster_km),methode_d=metric,methode_c=centroid_select_method_km,max_iterations=max_iterations_km, dataset=dataset)#k=2, pca=2, methode_d2 methode_c 1 3000 800
             kmeansClustering.fit(dataset)
-            res=kmeansClustering._cluster()[:, -1]
+            res=kmeansClustering._cluster()
+            res0 = res[:, :-1]
+            res = res[:, -1]
             km_labeled_dataset = np.concatenate((self.dataset1[:, :-1], res.reshape(-1, 1)), axis=1)
             prediction=kmeansClustering._prediction(instance.tolist())[0]
             labeled_dataset = pd.DataFrame(km_labeled_dataset, columns=[f"feature_{i+1}" for i in range((km_labeled_dataset.shape[1])-1)] + ["cluster_label"])
