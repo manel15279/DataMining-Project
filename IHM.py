@@ -163,6 +163,7 @@ class Preprocessing:
         self.dataset = np.delete(self.dataset,to_delete, axis=1)
         valid_indices = [col for col in to_delete if col < len(self.dataFrame.columns)]
         self.dataFrame = self.dataFrame.drop(self.dataFrame.columns[valid_indices], axis=1)
+        print("cols of dt after preprocessing : ",self.dataFrame.columns)
 
     #===============================DATASET2================================================================================================================================================================================================================================
     def year_mapping(self, time_period):
@@ -1105,10 +1106,10 @@ def DB_Scan(radius,min_points,methode_d, dataset):
 
 class App:
     def __init__(self):
-        self.dataFrame1 = pd.read_csv('Dataset1.csv')
-        self.dataset1 = np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1)
+        self.df1 = pd.read_csv('Dataset1.csv')
+        self.dt1 = np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1)
         self.dataset11 = (np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1))[:,:-1]
-        self.attribute_analyzer = AttributeAnalyzer(self.dataset1, self.dataFrame1)
+        self.attribute_analyzer = AttributeAnalyzer(self.dt1, self.df1)
         self.dataFrame2 = pd.read_csv('Dataset2.csv')
         self.dataFrame2 = self.dataFrame2.replace({pd.NA: np.nan})
         self.dataset2 = self.dataFrame2.to_numpy()
@@ -1126,7 +1127,7 @@ class App:
         return num_rows, num_cols, attr_desc
     
     def preprocessing_general1(self, manque_meth, aberrante_meth, normalization_meth, vmin, vmax):
-        self.preprocessor1 = Preprocessing(self.dataset1, self.dataFrame1)
+        self.preprocessor1 = Preprocessing(self.dt1, self.df1)
         self.preprocessor1.remplacement_manquant_generale(manque_meth)
         self.preprocessor1.remplacement_aberantes_generale(aberrante_meth)
         self.preprocessor1.normalisation_generale(normalization_meth, int(vmin), int(vmax))
@@ -1533,7 +1534,7 @@ class App:
                         gr.Markdown("""# Dataset1 Analysis Dashboard""")
                         
                         with gr.Row():
-                            inputs = [gr.Dataframe(label="Dataset1", value=self.dataFrame1)]
+                            inputs = [gr.Dataframe(label="Dataset1", value=self.df1)]
                            
                             with gr.Column():
                                 outputs = [gr.Textbox(label="Number of Rows"), gr.Textbox(label="Number of Columns"), gr.Dataframe(label="Attributes description")]
@@ -1546,7 +1547,7 @@ class App:
                         gr.Markdown("""# Attributes Analysis""")
                         
                         with gr.Row():
-                            inputs = [gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.dataFrame1.columns.tolist())], multiselect=False, label="Attributes", info="Select an attribute : "), gr.Radio(["With Outliers", "Without Outliers"], label="Box Plot Parameters"), gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.dataFrame1.columns.tolist())], multiselect=False, label="Scatter Plot Parameters", info="Select a second attribute for the scatter plot : ")]
+                            inputs = [gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.df1.columns.tolist())], multiselect=False, label="Attributes", info="Select an attribute : "), gr.Radio(["With Outliers", "Without Outliers"], label="Box Plot Parameters"), gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.df1.columns.tolist())], multiselect=False, label="Scatter Plot Parameters", info="Select a second attribute for the scatter plot : ")]
                         
                         with gr.Row():
                             with gr.Column():
