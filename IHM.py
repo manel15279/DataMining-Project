@@ -1056,7 +1056,7 @@ class Point:
         self.instance=instance
         self.marked=False
         self.cluster=False
-        
+         
 def Voisinage(P,radius,methode_d, dataset):
     voisins=[]
     for i in range(dataset.shape[0]):
@@ -1068,7 +1068,7 @@ def DB_Scan(radius,min_points,methode_d, dataset):
     C = 0
     Outlier=[]
     dataset_labeled=[]
-    listeP=[ Point(instance) for instance in dataset[:,:]]
+    listeP=[ Point(instance) for instance in dataset]
     
     for P in listeP:
         if not P.marked:
@@ -1383,8 +1383,8 @@ class App:
 
         return f"confusion_matrix_{model}.png"
 
-    def clustering_plots(self, component1, component2, result):
-        plt.scatter(component1, component2, c=result, cmap='cividis', marker='H', edgecolors='k')
+    def clustering_plots(self, res0, res):
+        plt.scatter([r[0] for r in res0], [r[1] for r in res0], c=res, cmap='cividis', marker='H', edgecolors='k')
         plt.title('Clustering with PCA')
         plt.xlabel('component 1 of PCA')
         plt.ylabel('componant 2 of PCA')
@@ -1500,18 +1500,20 @@ class App:
 
         else:
             DBSCANClustering=DB_Scan(radius_db, min_samples_db, methode_d=metric, dataset=dataset)# 1.2 5 0.45  1/0/1
+            res0 = np.array(DBSCANClustering[0])
             res = np.array(DBSCANClustering[1])
+            print("result:", res)
 
             DBSCAN_labeled_dataset = np.concatenate((self.dataset1[:, :-1], res.reshape(-1, 1)), axis=1)
             labeled_dataset = pd.DataFrame(DBSCAN_labeled_dataset, columns=[f"feature_{i+1}" for i in range((DBSCAN_labeled_dataset.shape[1])-1)] + ["cluster_label"])
             
-        self.ClusteringMetrics = ClusteringMetrics(dataset, res)
-        silhouette_score, intra_distance, inter_distance = self.ClusteringMetrics.silhouette_score(dataset, res, metric)
+        self.ClusteringMetrics = ClusteringMetrics(res0, res)
+        silhouette_score, intra_distance, inter_distance = self.ClusteringMetrics.silhouette_score(res0, res, metric)
 
 
         if pca_clust=="Yes":
             plot1 = plt.figure()
-            self.clustering_plots(dataset[:, 0], dataset[:, 1], res)
+            self.clustering_plots(res0, res)
             plot1.savefig("clustering_PCA.png")
             plt.close(plot1)
             plot = ["clustering_PCA.png"]
