@@ -9,7 +9,6 @@ This repository contains the code and documentation for a comprehensive data min
 ---
 ![GUI Screenshot](screenshots.png)
 
-
 ## Description
 
 1. **Data Exploration and Preprocessing:**
