@@ -1,1122 +1,42 @@
 import numpy as np
 import pandas as pd
-import copy as cp
-import statistics
-import re
 import math
-import matplotlib.pyplot as plt 
-from itertools import combinations
-from mlxtend.frequent_patterns import apriori
-from mlxtend.frequent_patterns import association_rules
-from mlxtend.preprocessing import TransactionEncoder
 import pandas as pd
 import matplotlib.pyplot as plt
 from  collections import Counter
-from mlxtend.frequent_patterns import apriori
-from mlxtend.frequent_patterns import association_rules
-from mlxtend.preprocessing import TransactionEncoder
-import time
-import csv
-from sklearn.linear_model import LinearRegression
-from datetime import datetime
 import random
-import squarify
 import seaborn as sns
 import gradio as gr
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.spatial import Delaunay
-import psutil
 import io
 from sklearn.decomposition import PCA
-
+import preprocessing
+import attributeAnalyzer
+import FrequentItemsets
+import StatisticsCOVID19
+import Kmeans
+import KNN
+import DtClassifier
+import DBScan
+import RandomForestClassifier
+import ClassifierMetrics
+import ClusteringMetrics
 plt.style.use('seaborn-v0_8-whitegrid')
 sns.set_palette("Set2")
 
 
-class Preprocessing:
-    def __init__(self, dataset, dataFrame):
-        self.dataset = dataset
-        self.dataFrame = dataFrame   
-        numeric_columns = self.dataFrame.select_dtypes(include=['int', 'float']).columns.tolist() # column label
-        self.numeric_columns = [self.dataFrame.columns.get_loc(col) for col in numeric_columns]
-  
-    def val_manquante(self, attribute):
-        L=[]
-        for i in range(0,len(self.dataset[:,attribute])):
-            if not re.fullmatch(r"\d+\.(:?\d+)?", str(self.dataset[i, attribute])):
-                L.append(i)
-        return L
-    
-    def calcul_mediane(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        liste = cp.deepcopy(datasetCurrated)
-        liste.sort()
-        if liste.size % 2 !=0 :
-        
-            mediane=liste[((liste.size+1)//2) -1]
-        else :
-            mediane=(liste[(liste.size//2)-1]+liste[liste.size//2])/2
-        return mediane
-    
-    def quartilles_homeMade(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        liste = cp.deepcopy(datasetCurrated)
-        liste.sort()
-        q0=liste[0]
-        q1=(liste[liste.size//4-1]+liste[liste.size//4]) /2
-        q3=(liste[liste.size*3//4-1]+liste[liste.size*3//4]) /2
-        q2=self.calcul_mediane(attribute)
-        q4=liste[-1]
-        return [q0,q1,q2,q3,q4]
-    
-    def ecart_type_home_made(self, attribut):
-        datasetCurrated=np.delete(self.dataset[:,attribut], self.val_manquante(attribut))
-        mean = np.mean(datasetCurrated)
-        ecarts = [(val - mean) ** 2 for val in datasetCurrated]
-        variance = np.mean(ecarts) 
-        return np.sqrt(variance)
-
-    def Discretisation(self, attribute):
-        vals = self.dataset[:,attribute].copy()
-        vals.sort()
-        q = 1+(10/3)*np.log10(self.dataset.shape[0])
-        nbrelmt=math.ceil(self.dataset[:,attribute].shape[0]/q)
-        
-        for  val in range(0,self.dataset[:,attribute].shape[0]):  
-            for i in range(0,vals.shape[0],nbrelmt):
-                if(vals[i]>self.dataset[val,attribute]):
-                    sup=i
-                    break
-            self.dataset[val,attribute]=np.median(vals[sup-nbrelmt:sup])
-                
-    def remplacement_val_manquantes(self, methode, attribute):
-        missing=self.val_manquante(attribute)
-        for i in missing:
-            if methode=='Mode':
-                self.dataset[i,attribute]= statistics.mode(self.dataset[:,attribute])    
-            else:
-                self.dataset[i,attribute]= np.mean([self.dataset[j,attribute] for j in range(0,len(self.dataset)) if self.dataset[j,-1]==self.dataset[i,-1] and not j in missing])
-
-    def remplacement_val_aberrantes(self, methode,attribute):
-        abberante=[]
-        if methode=='Linear Regression':
-            IQR=(np.percentile(self.dataset[:, attribute], 75)-np.percentile(self.dataset[:, attribute], 25))*1.5
-            for i in range(0,len(self.dataset[:,attribute])):
-                if (self.dataset[i,attribute] >(np.percentile(self.dataset[:, attribute], 75)+IQR) or self.dataset[i,attribute]<(np.percentile(self.dataset[:, attribute], 25)-IQR)):
-                    abberante.append(i)
-            X = np.delete(self.dataset, attribute, axis=1)
-            X = np.delete(X, abberante, axis=0)
-            y=self.dataset[:,attribute]
-            y= np.delete(y, abberante, axis=0).reshape(-1, 1)
-
-            model = LinearRegression().fit(X, y)
-            
-            for i in abberante:
-                x2=np.delete(self.dataset, attribute, axis=1)
-                X_new =x2[i,:].T.reshape(1, -1)
-                self.dataset[i,attribute]=model.predict(X_new)[0][0]
-        else:
-            self.Discretisation(attribute)
-
-    def remplacement_manquant_generale(self, methode):
-        for i in range(0,self.dataset.shape[1]-1):
-            self.remplacement_val_manquantes(methode,i) 
-
-    def remplacement_aberantes_generale(self, methode):
-        for i in range(0,self.dataset.shape[1]-1):
-            self.remplacement_val_aberrantes(methode,i)
-     
-    def normalisation(self, methode, attribute, vmin, vmax):
-        if methode=='Vmin-Vmax':
-            vminOld=float(self.dataset[:,attribute].min())
-            vmaxOld=float(self.dataset[:,attribute].max())
-            for val in range(0,self.dataset[:,attribute].shape[0]):
-                self.dataset[val,attribute]=vmin+(vmax-vmin)*((float(self.dataset[val,attribute])-vminOld)/(vmaxOld-vminOld))
-
-        else:
-            vmean=np.mean(self.dataset[:,attribute])
-            s=np.mean( (self.dataset[:,attribute]  -vmean)**2)
-            for  val in range(0,self.dataset[:,attribute].shape[0]):
-                self.dataset[val,attribute]=(self.dataset[val,attribute]-vmean)/s 
-    
-    def normalisation_generale(self, methode, vmin, vmax):
-        for i in range(0,self.dataset.shape[1]-1):
-            self.normalisation(methode,i, vmin, vmax)
-
-    def reduire_row(self):
-        self.dataset= np.unique(self.dataset, axis=0, return_index=False)
-    
-    def coef_correl(self, attribut1,attribut2):
-        moy1=np.mean(self.dataset[:,attribut1])
-        moy2=np.mean(self.dataset[:,attribut2])
-        e1=self.ecart_type_home_made(attribut1)
-        e2=self.ecart_type_home_made(attribut2)
-        return (self.dataset[:,attribut1].dot(self.dataset[:,attribut2])-(len(self.dataset)*moy1*moy2))/((len(self.dataset)-1)*(e1*e2))
-    
-    def reduire_dim(self, treashold):
-        to_delete=[]
-        for i in range(0,self.dataset.shape[1]-1):
-            for j in range(i+1,self.dataset.shape[1]):
-                if (np.abs(self.coef_correl(i,j))>treashold):
-                    to_delete.append(i)
-        print("to delete: ", to_delete)
-        self.dataset = np.delete(self.dataset,to_delete, axis=1)
-        valid_indices = [col for col in to_delete if col < len(self.dataFrame.columns)]
-        self.dataFrame = self.dataFrame.drop(self.dataFrame.columns[valid_indices], axis=1)
-        print("cols of dt after preprocessing : ",self.dataFrame.columns)
-
-    #===============================DATASET2================================================================================================================================================================================================================================
-    def year_mapping(self, time_period):
-        self.dataFrame['Start date'] = pd.to_datetime(self.dataFrame['Start date'], errors='coerce')
-        self.dataFrame['end date'] = pd.to_datetime(self.dataFrame['end date'], errors='coerce')
-
-        yearly_intervals = self.dataFrame.groupby((self.dataFrame['Start date'].dt.year))['time_period'].agg(['min', 'max'])
-
-        year_mapping = {}
-
-        for year, interval in yearly_intervals.iterrows():
-            year_mapping[(interval['min'], interval['max'])] = int(year)
-
-        for interval, y in year_mapping.items():
-            if interval[0] <= int(time_period) <= interval[1]:
-                return y
-        
-    def convert_date(self, time_period, date):
-        date = str(date)
-        dd_mm_yy = re.compile(r'\b\d{1,2}/\d{1,2}/\d{4}\b')
-        dd_mmm = re.compile(r'\b\d{1,2}-[a-zA-Z]{3}\b')
-
-        if dd_mm_yy.match(date):
-            formatted_date = datetime.strptime(date, '%m/%d/%Y')
-            return np.datetime64(formatted_date)
-        elif dd_mmm.match(date):
-            day, month = date.split('-')
-            month_dict = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
-            month = month_dict[month]
-            year = self.year_mapping(time_period)
-            return np.datetime64(datetime(int(year), month, int(day)))
-        else:
-            return None
-        
-    def remplacement_val_manquantes2(self, method, attribut):
-        missing = [i for i, val in enumerate(self.dataset[:, attribut]) if np.isnan(val)]
-        
-        for i in missing:
-            zone = self.dataset[i, 0]
-            time_period = self.dataset[i, 1]
-            matching_rows = [z for z in range(self.dataset.shape[0]) if self.dataset[z, 1] == time_period and not np.isnan(self.dataset[z, attribut])]
-            if method == "Mode":
-                if matching_rows:
-                    mode = statistics.mode(self.dataset[matching_rows, attribut])
-                    self.dataset[i, attribut] = mode
-                else:
-                    zone_rows = [z for z in range(self.dataset.shape[0]) if self.dataset[z, 0] == zone and not np.isnan(self.dataset[z, attribut])]
-                    mode = statistics.mode(self.dataset[zone_rows, attribut])
-                    self.dataset[i, attribut] = mode
-            else:
-                if matching_rows:
-                    mean_val = np.mean(self.dataset[matching_rows, attribut])
-                    self.dataset[i, attribut] = mean_val
-                else:
-                    zone_rows = [z for z in range(self.dataset.shape[0]) if self.dataset[z, 0] == zone and not np.isnan(self.dataset[z, attribut])]
-                    mean_val = np.mean(self.dataset[zone_rows, attribut])
-                    self.dataset[i, attribut] = mean_val
-
-    def remplacement_manquant_generale2(self, method):
-        for attribute_index in self.numeric_columns:
-           self.remplacement_val_manquantes2(method, attribute_index)
-        
-    def remplacement_aberantes_generale2(self, method):
-        if method=="Discritisation":
-            categorical_columns = [0, 1, 2]
-            self.numeric_columns = [col for col in self.numeric_columns if col not in categorical_columns]
-        for attribute_index in self.numeric_columns:
-            self.remplacement_val_aberrantes(method, attribute_index)
-
-class AttributeAnalyzer:
-    def __init__(self, dataset, dataFrame):
-        self.dataFrame = dataFrame
-        self.dataset = dataset
-        
-    def val_manquante(self, attribute):
-        L=[]
-        for i in range(0,len(self.dataset[:,attribute])):
-            if not re.fullmatch(r"\d+\.(:?\d+)?", str(self.dataset[i, attribute])):
-                L.append(i)
-        return L
-    
-    def calcul_mediane(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        liste = cp.deepcopy(datasetCurrated)
-        liste.sort()
-        if liste.size % 2 !=0 :
-        
-            mediane=liste[((liste.size+1)//2) -1]
-        else :
-            mediane=(liste[(liste.size//2)-1]+liste[liste.size//2])/2
-        return mediane
-
-    def tendance_centrales_homeMade(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        moyenne2 = datasetCurrated.sum() / datasetCurrated.shape[0]
-        mediane2 = self.calcul_mediane(attribute)
-        unique_values, counts = np.unique(datasetCurrated, return_counts=True)
-        Indicemax = np.where(counts == max(counts))[0]
-        mode2=[unique_values[i] for i in Indicemax]
-        return [moyenne2,mediane2,mode2]
-    
-    def quartilles_homeMade(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        liste = cp.deepcopy(datasetCurrated)
-        liste.sort()
-        q0=liste[0]
-        q1=(liste[liste.size//4-1]+liste[liste.size//4]) /2
-        q3=(liste[liste.size*3//4-1]+liste[liste.size*3//4]) /2
-        q2=self.calcul_mediane(attribute)
-        q4=liste[-1]
-        return [q0,q1,q2,q3,q4]
-    
-    def ecart_type_home_made(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        mean = np.mean(datasetCurrated)
-        ecarts = [(val - mean) ** 2 for val in datasetCurrated]
-        variance = np.mean(ecarts) 
-        return np.sqrt(variance)
-    
-    def Boite_a_moustache(self, attribute,boolen):
-        abberante=[]
-        liste=[]
-        q3=self.quartilles_homeMade(attribute)[-2]
-        q1=self.quartilles_homeMade(attribute)[1]
-        IQR=(self.quartilles_homeMade(attribute)[-2]-self.quartilles_homeMade(attribute)[1])*1.5
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-
-        for var in datasetCurrated:
-            if (var <(q3+IQR) and var>(q1-IQR)):
-                liste.append(var)
-            else:
-                abberante.append(var)  
-        if boolen:
-            plt.boxplot(datasetCurrated)
-        
-        else:
-            plt.boxplot(liste)
-
-    def scatterplot(self, attribute, attribute2):
-        plt.scatter(self.dataset[:,attribute],self.dataset[:,attribute2],marker ='p')
-        plt.title(f'Scatter Plot of the attributes {self.dataFrame.columns.tolist()[attribute]} and {self.dataFrame.columns.tolist()[attribute2]}')
-        plt.xlabel(f'{self.dataFrame.columns.tolist()[attribute]} Attribute values')
-        plt.ylabel(f'{self.dataFrame.columns.tolist()[attribute2]} Attribute values')
-   
-
-    def histogramme(self, attribute):
-        datasetCurrated=np.delete(self.dataset[:,attribute], self.val_manquante(attribute))
-        plt.hist(datasetCurrated, bins=math.ceil(1+(10/3)*np.log10(self.dataset.shape[0])),edgecolor='black')
-        plt.title(f'Histograme of the attribute {self.dataFrame.columns.tolist()[attribute]}')
-        plt.xlabel('Attribute values')
-        plt.ylabel('Frequence')
-    
-    def attribute_infos(self, attribute, outliers, scatter_attribute):
-        moyenne2, mediane2, mode2 = self.tendance_centrales_homeMade(attribute)
-        q0, q1, q2, q3, q4 = self.quartilles_homeMade(attribute)
-        ecart_type = self.ecart_type_home_made(attribute)
-
-        hist_fig = plt.figure()
-        self.histogramme(attribute)
-        hist_fig.savefig("histogramme.png")
-        plt.close(hist_fig)
-
-        box_plot_fig = plt.figure()
-        self.Boite_a_moustache(attribute, outliers)  
-        box_plot_fig.savefig("boxPlot.png")
-        plt.close(box_plot_fig)
-
-        scatter_plot_fig = plt.figure()
-        self.scatterplot(attribute, scatter_attribute)
-        scatter_plot_fig.savefig("scatterPlot.png")
-        plt.close(scatter_plot_fig)
-
-        plots = ["histogramme.png", "boxPlot.png", "scatterPlot.png"]
-
-        return moyenne2, mediane2, mode2, q0, q1, q2, q3, q4, ecart_type, plots
-
-class StatisticsCOVID19:
-    def __init__(self, df):
-        self.df = pd.DataFrame(df)
-        self.df['Year'] = pd.to_datetime(self.df['Start date']).dt.year
-        self.df['Month'] = pd.to_datetime(self.df['Start date']).dt.month
-
-    def plot_total_cases_and_positive_tests(self, chosen_attribute):
-        totals = self.df.groupby('zcta')[[chosen_attribute]].sum().reset_index()
-        bar_width = 0.5
-        index = totals.index
-        plt.bar(index, totals[chosen_attribute], bar_width, label=chosen_attribute)
-        plt.xlabel('Zones')
-        plt.ylabel('Count')
-        plt.title(f'Distribution du nombre total de {chosen_attribute} par zones')
-
-    def plot_total_cases_and_positive_tests_treemap(self, chosen_attribute):
-        totals = self.df.groupby('zcta')[[chosen_attribute]].sum().reset_index()
-
-        totals['value_normalized'] = totals[chosen_attribute] / totals[chosen_attribute].sum()
-
-        totals = totals.sort_values(by=chosen_attribute, ascending=False)
-
-        colors = plt.cm.tab10(range(len(totals)))
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        squarify.plot(
-            sizes=totals['value_normalized'],
-            label=totals['zcta'],
-            color=colors,
-            alpha=0.7,
-            ax=ax 
-        )
-
-        plt.title(f'Distribution du nombre de {chosen_attribute} par zone')
-        plt.axis('off') 
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close(fig)
-
-        # Save the buffer to the specified filename
-        with open("total_cases_and_positive_tests_treemap_plot.png", 'wb') as f:
-            f.write(buffer.getvalue())
-
-        return "total_cases_and_positive_tests_treemap_plot.png" 
-
-    def weekly_plot(self, chosen_zone, chosen_year, chosen_month, chosen_attribute):
-
-        zone_df = self.df[self.df['zcta'] == chosen_zone]
-
-        hebdo_df = zone_df[(zone_df['Month'] == chosen_month) & (zone_df['Year'] == chosen_year)]
-
-        plt.plot(hebdo_df['Start date'], hebdo_df[chosen_attribute], label=chosen_attribute)
-        plt.title(f'L\'évolution hebdomadaire du total de {chosen_attribute} pour la zone {chosen_zone} pendant le {chosen_month} ème mois de l\'année {chosen_year}')
-        plt.xlabel('Dates')
-        plt.ylabel('Count')
-
-    def monthly_plot(self, chosen_zone, chosen_year, chosen_attribute):
-
-        zone_df = self.df[self.df['zcta'] == chosen_zone]
-
-        monthly_df = zone_df[zone_df['Year'] == chosen_year]
-        month_df = monthly_df.groupby('Month')[[chosen_attribute]].sum().reset_index()
-        plt.plot(month_df['Month'], month_df[chosen_attribute], label=chosen_attribute)
-        plt.title(f'L\'évolution mensuelle du total de {chosen_attribute} pour la zone {chosen_zone} pendant l\'année {chosen_year}')
-        plt.xlabel('Months')
-        plt.ylabel('Count') 
-        
-    def annual_plot(self, chosen_zone, chosen_attribute):
-
-        zone_df = self.df[self.df['zcta'] == chosen_zone]
-
-        annual_df = zone_df.groupby('Year')[[chosen_attribute]].sum().reset_index()
-
-        plt.plot(annual_df['Year'], annual_df[chosen_attribute], label=chosen_attribute)
-        plt.title(f'L\'évolution annuelle du total de {chosen_attribute} pour la zone {chosen_zone}')
-        plt.xlabel('Years')
-        plt.ylabel('Count') 
-        plt.xticks(annual_df['Year'])
-
-
-    def stacked_bar_plot(self):
-        self.df = self.df.sort_values(by=['Year'])  # Sort the DataFrame by 'Year'
-
-        grouped_data = self.df.groupby(['Year', 'zcta'])['case count'].sum().unstack()
-
-        years = self.df['Year'].unique()
-        zone_columns = grouped_data.columns
-
-        bottom_values = None
-
-        for zone in zone_columns:
-            values = grouped_data[zone].reindex(years, fill_value=0).values
-            if bottom_values is None:
-                plt.bar(years, values, label=zone)
-                bottom_values = values
-            else:
-                plt.bar(years, values, label=zone, bottom=bottom_values)
-                bottom_values += values
-
-        plt.title('Stacked Bar Graph of Case Count by Zone and Year')
-        plt.xlabel('Year')
-        plt.ylabel('Case Count')
-        plt.legend(title='Zone', bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.xticks(years) 
-
-
-    def pop_tests_plot(self):
-        data = self.df[['population', 'test count']]
-        grouped_data = data.groupby('population').sum().reset_index()
-
-        plt.plot(grouped_data['population'], grouped_data['test count'])
-        plt.title('Population vs Test Count')
-        plt.xlabel('Population')
-        plt.ylabel('Test count')
-
-    def plot_top_zones_impacted(self, n):
-        grouped_data = self.df.groupby('zcta')['case count'].sum().sort_values(ascending=True).head(n)
-        bar_width = 0.1
-
-        grouped_data.plot.barh(figsize=(12, 6), width=bar_width)
-        plt.title(f'Top {n} Zones les plus impactées par le Coronavirus')
-        plt.xlabel('Nombre de Cas')
-
-    def plot_time_period_data(self, chosen_time_period, chosen_attribute):
-        selected_data = self.df[(self.df['time_period'] == chosen_time_period)]
-        grouped_data = selected_data.groupby('zcta')[[chosen_attribute]].sum().reset_index()
-
-        bar_width = 0.2
-        index = grouped_data.index
-
-        plt.bar(index - bar_width, grouped_data[chosen_attribute], width=bar_width, label=chosen_attribute)
-        plt.xticks(index - bar_width, grouped_data['zcta'])
-        plt.xlabel('Zone (zcta)')
-        plt.ylabel('Count')
-        plt.title(f'Total of {chosen_attribute} for Time Period {chosen_time_period}')
-        plt.legend()
-
-class FrequentItemsets:
-    def Ck_generator(self, k, L, datasetT):
-        if k==1:
-            uniItemListe=set()
-            for i in range(0,len(datasetT)):
-                uniItemListe.update(set(datasetT[i]))
-            return [(v,) for v in uniItemListe]
-        else:
-            C=[]
-            if len(L)==0: return C
-            listeitemsunique=sorted(set([element for tuple in L.keys() for element in tuple]))
-            if len(listeitemsunique)<k: return []
-            combinations_list = list(combinations(listeitemsunique, k))
-            if k==2: 
-                return combinations_list
-            #le pruning
-            for combi in combinations_list:
-                exist=True
-                sous_combinations_list = list(combinations(combi, k-1))
-                
-                for sous_combi in sous_combinations_list:
-                    if sous_combi not in list(L.keys()):
-                        exist=False
-                        break
-                if exist==True:
-                    C.append(combi)   
-            return C
-        
-    def support_calculator(self, C, datasetT):
-        dico={}
-        dico.update({val:0 for val in C})
-        for row in datasetT:
-            combinations_list = list(combinations(row, len(list(dico.keys())[0])))
-            for val in combinations_list:
-                if val in dico: 
-                    dico[val]+=1
-        dico.update({key:val/len(datasetT) for key,val in dico.items()})
-    
-        return dico
-
-    def Lk_generator(self, C, supp_min):
-        c={}
-        c=({key:float(val) for key,val in C.items() if float(val)>=supp_min})
-        return c
-    
-    def appriori(self, min_supp, datasetT):
-        L=[]
-        k=1
-        C=self.Ck_generator(k,None,datasetT)
-    
-        while(len(C)!=0):
-            S=self.support_calculator(C,datasetT)
-        
-            l=self.Lk_generator(S,min_supp)
-            if len(l)!=0:L.append(l)
-        
-            k+=1
-            C=self.Ck_generator(k,l,None)
-            
-        return L
-    
-    def regle_association(self, L):
-        regles=pd.DataFrame()
-        first=True
-        for key,value in L.items():
-            if first==True:
-                k=len(key)
-                first==False
-            if k==2 :
-                    new_row = {'antecedant':(key[0],),'consequent':(key[1],),'mesure':0.0,'support':value}
-                    regles = pd.concat([regles, pd.DataFrame([new_row])], ignore_index=True)
-                    new_row={'antecedant':(key[1],),'consequent':(key[0],),'mesure':0.0,'support':value}
-                    regles = pd.concat([regles, pd.DataFrame([new_row])], ignore_index=True)
-            else:
-                for i in range(k-1,k-(k//2)-1,-1):
-                    sous_combinations_list = list(combinations(key,i))#ab c  / ac bc 
-                    for sous_comb in sous_combinations_list:
-                        reste=sorted(set(key).symmetric_difference(sous_comb))
-                        regles = pd.concat([regles, pd.DataFrame([{'antecedant':tuple(reste),'consequent':sous_comb,'mesure':0.0,'support':value}])], ignore_index=True)
-                        if not len(tuple(reste))==len(sous_comb):
-                            regles = pd.concat([regles, pd.DataFrame([{'antecedant':sous_comb,'consequent':tuple(reste),'mesure':0.0,'support':value}])], ignore_index=True)
-            
-        return regles
-    
-    def mesure_calculator(self, r, methode, L):#A,D->B,C
-        if methode==0:#confidence
-            return (r["support"]/L[len(r["antecedant"])-1][r["antecedant"]])
-        elif methode==1:#cosine
-            return (r["support"]/math.sqrt(L[len(r["antecedant"])-1][r["antecedant"]]*L[len(r["consequent"])-1][r["consequent"]]))
-        elif methode==2:#lift
-            return r["support"]/(L[len(r["antecedant"])-1][r["antecedant"]]*L[len(r["consequent"])-1][r["consequent"]])
-        elif methode==3:#jackard
-            return r["support"]/(L[len(r["antecedant"])-1][r["antecedant"]]+L[len(r["consequent"])-1][r["consequent"]]- r["support"])
-        else:#kulc
-            return 0.5*((r["support"]/L[len(r["antecedant"])-1][r["antecedant"]])+(r["support"]/L[len(r["consequent"])-1][r["consequent"]]))
-
-    def regles_frequente(self, L, conf_min, m):
-
-        regles=pd.DataFrame()
-        for l in L[1:]:
-            regles= pd.concat([regles, self.regle_association(l)], ignore_index=True)
-            
-
-        for i in range(0,len(regles)):
-            regles.iloc[i,2] = self.mesure_calculator(regles.loc[i],m,L)
-        
-        if not len(regles)==0:
-            regles=regles[regles['mesure'] >= conf_min]
-            
-        return regles
-    
-    def rules_nbr_plot(self, transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
-        results= np.empty((0,3),float)
-        for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.01):
-            for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.01):
-                L=self.appriori(sup_min, transactions_table)
-                rs=self.regles_frequente(L,conf_min,0)
-            
-                results=np.vstack((results,np.array([sup_min,conf_min,len(rs)])))
-
-        fig, ax = plt.subplots(subplot_kw={'projection': '3d'})
-
-        Z = results[:, 2].reshape(results.shape[0], 1)
-        ax.scatter(results[:, 0], results[:, 1], Z, c='r', marker='o')
-
-        tri = Delaunay(results[:, :2])
-
-        ax.plot_trisurf(results[:, 0], results[:, 1], Z.flatten(), triangles=tri.simplices, cmap="viridis", linewidth=0.9, antialiased=True)
-
-        ax.set_xlabel('sup')
-        ax.set_ylabel('conf')
-        ax.set_zlabel('nbr de regles frequentes', labelpad=10)
-
-        ax.view_init(elev=10, azim=-40)
-        plt.title("Nombre de regles frequentes générées par sup_min et conf_min")
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close(fig)
-
-        with open("rules_nbr_plot.png", 'wb') as f:
-            f.write(buffer.getvalue())
-
-        return "rules_nbr_plot.png"
-        
-    def freq_items_nbr_plot(self, transactions_table, supp_lower_bound, supp_upper_bound):
-        resultsf= np.empty((0,2),float)
-        for sup_min in np.arange(supp_upper_bound,supp_lower_bound,-0.001):
-            L=self.appriori(sup_min,transactions_table)
-            resultsf=np.vstack((resultsf,np.array([sup_min,sum(len(l) for l in L)]))) 
-        
-        x = resultsf[:,0]
-        y = resultsf[:,1]
-
-        plt.plot(x, y)
-        plt.title('Evolution du nombre de motifs frequents selon le support min')
-        plt.xlabel('supmin')
-        plt.ylabel('nbr motifs frequents')
-
-    def time_exec_plot(self, transactions_table, supp_lower_bound, supp_upper_bound):
-        TimeResults= np.empty((0,2),float)
-
-        for sup_min in np.arange(supp_upper_bound,supp_lower_bound,-0.002):
-            duree=0.0
-            for j in range(0,10):
-                start=time.time()
-                L=self.appriori(sup_min,transactions_table)
-                duree+=time.time()-start
-            TimeResults=np.vstack((TimeResults,np.array([sup_min,duree/10.0])))
-                    
-        x = TimeResults[:,0]
-        y = TimeResults[:,1]
-
-        plt.plot(x, y)
-        plt.title('Evolution du temps d''execution d''apriori selon le sup_min')
-        plt.xlabel('Supmin')
-        plt.ylabel('Temps d execution')
-
-    def memory_alloc_plot(self, transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound):
-        resultsMemory= np.empty((0,3),float)
-
-        for sup_min in np.arange(supp_lower_bound,supp_upper_bound,0.06):
-            for conf_min in np.arange(conf_lower_bound,conf_upper_bound,0.02):
-                initial_memory = psutil.Process().memory_info().rss / 1024 / 1024 /2024 # in MB
-                L=self.appriori(sup_min,transactions_table)
-                rs=self.regles_frequente(L,conf_min,0)
-                final_memory = psutil.Process().memory_info().rss / 1024 / 1024 /2024 # in MB
-                resultsMemory=np.vstack((resultsMemory,np.array([sup_min,conf_min,final_memory-initial_memory])))
-
-        fig, ax = plt.subplots(subplot_kw={'projection': '3d'})
-
-        Z = resultsMemory[:, 2].reshape(resultsMemory.shape[0], 1)
-        ax.scatter(resultsMemory[:, 0], resultsMemory[:, 1], Z, c='r', marker='o')
-
-        # Create Delaunay triangulation
-        tri = Delaunay(resultsMemory[:, :2])
-
-        # Plot the surface using the triangulation
-        ax.plot_trisurf(resultsMemory[:, 0], resultsMemory[:, 1], Z.flatten(), triangles=tri.simplices, cmap="viridis", linewidth=0.9, antialiased=True)
-
-        ax.set_xlabel('sup__min')
-        ax.set_ylabel('conf_min')
-        ax.set_zlabel('memoire',labelpad=10)
-        ax.view_init(elev=10, azim=-30)
-        plt.title("Evolution de l'espace aloué à l''algorithme apriori et regles d''association selon le sup_min et conf_min")
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        plt.close(fig)
-
-        # Save the buffer to the specified filename
-        with open("memory_alloc_plot.png", 'wb') as f:
-            f.write(buffer.getvalue())
-
-        return "memory_alloc_plot.png"
-
-def distance(instance1,instance2,methode):
-    if methode==0: #cosine
-         return  1-(  ( np.sum([instance1[i]*instance2[i] for i in range(0,len(instance1))]))  /(math.sqrt(np.sum([i**2 for i in instance1]))*math.sqrt(np.sum([i**2 for i in instance2]))))
-    else: #minkowski
-        return sum( np.abs(instance1-instance2)**methode)**(1/methode)
-
-class ClassifierMetrics:
-    def __init__(self, Y_test, y_pred):
-        self.Y_test = Y_test
-        self.y_pred = y_pred
-    
-    def confusion_matrix(self, y_test, y_pred):
-        N = len(np.unique(y_test)) 
-        M= np.zeros((N,N),dtype=int)
-        for i in range(0,y_test.shape[0]) : 
-            M[int(y_test[i])][int(y_pred[i])] += 1    
-        return M
-
-    def Values(self, m):
-        TP= m.diagonal()
-        FP = m.sum(axis=0) - TP
-        FN = m.sum(axis=1) - TP
-        TN =  m.sum() - (TP + FN + FP)
-        return TP, FN, FP, TN
-    
-    def recall_score(self, TP, FN):
-        return TP/(TP+FN)
-    
-    def precision_score(self, TP, FP):
-        return TP/(TP+FP)
-    
-    def FP_rate(self, FP, TN):
-        return  FP/(FP+TN)
-    
-    def specificity_score(self, TN, FP):
-        return TN/(TN+FP)
-    
-    def accuracy_score(self, m):
-        return np.sum(m.diagonal())/np.sum(m)
-    
-    def f1_score(self, TP, FP, FN):
-        if any(self.recall_score(TP, FN)+self.precision_score(TP, FP))==np.nan:
-            return 0
-        return 2*(self.recall_score(TP, FN)*self.precision_score(TP, FP))/(self.recall_score(TP, FN)+self.precision_score(TP, FP))
-
-class KNN:
-    def __init__(self, k, methode) -> None:
-        self.k = k
-        self.methode = methode
-
-    def fit(self, xt, yt):
-        self.Xtrain = xt
-        self.Ytrain = yt
-
-    def _predict(self, Xtest):
-        
-        # Calculate Distances
-        dist = np.apply_along_axis(lambda x: distance(x, Xtest, self.methode), axis=1, arr=self.Xtrain)
-
-        # Sort Distances
-        ind = np.argsort(dist)
-
-        # Select K Nearest Neighbors
-        knn = self.Ytrain[ind[:self.k]]
-
-        # Majority Voting
-        Y = statistics.mode(knn)
-        
-        return Y
-
-class Node():
-    def __init__(self, feature_index=None, threshold=None, left=None, right=None, info_gain=None, value=None):
-        #desicion node
-        self.feature_index = feature_index
-        self.threshold = threshold
-        self.left = left
-        self.right = right
-        self.info_gain = info_gain
-        # leaf node
-        self.value = value
-
-class DtClassifier:
-    def __init__(self, min_samples_split, max_depth, info_gain_method, n_features=None):
-        self.root = None
-        self.min_samples_split = min_samples_split
-        self.max_depth = max_depth
-        self.n_features = n_features
-        self.info_gain_method = info_gain_method
-
-    def build_tree(self, dataset, curr_depth=0):
-        X, Y = dataset[:, :-1], dataset[:, -1]
-        num_samples, num_features = np.shape(X)
-
-        # Pre-pruning
-        if num_samples < self.min_samples_split or curr_depth == self.max_depth:
-            leaf_value = self.calculate_leaf_value(Y)
-            return Node(value=leaf_value)
-
-        # find the best split
-        best_split = self.get_best_split(dataset, num_samples, num_features)
-
-        # Pre-pruning
-        if best_split is None or "info_gain" not in best_split or best_split["info_gain"] <= 0:
-            leaf_value = self.calculate_leaf_value(Y)
-            return Node(value=leaf_value)
-
-
-        left_subtree = self.build_tree(best_split["dataset_left"], curr_depth + 1)
-        right_subtree = self.build_tree(best_split["dataset_right"], curr_depth + 1)
-
-        # Post-pruning
-        current_info_gain = best_split["info_gain"]
-        leaf_info_gain = self.information_gain(Y, None, None, self.info_gain_method)
-        if leaf_info_gain >= current_info_gain:
-            leaf_value = self.calculate_leaf_value(Y)
-            return Node(value=leaf_value)
-
-        return Node(
-            best_split["feature_index"],
-            best_split["threshold"],
-            left_subtree,
-            right_subtree,
-            best_split["info_gain"]
-        )
-    
-    def get_best_split(self, dataset, num_samples, num_features):
-    
-        best_split = {}
-        max_info_gain = -float("inf")
-        
-        if self.n_features is not None:
-            feature_indices = np.random.choice(num_features, self.n_features, replace=False)
-        else:
-            feature_indices = range(num_features)
-        
-        for feature_index in feature_indices:
-            feature_values = dataset[:, feature_index]
-            possible_thresholds = np.unique(feature_values)
-            for threshold in possible_thresholds:
-                dataset_left, dataset_right = self.split(dataset, feature_index, threshold)
-                
-                if len(dataset_left) > 0 and len(dataset_right) > 0:
-                    y, left_y, right_y = dataset[:, -1], dataset_left[:, -1], dataset_right[:, -1]
-
-                    curr_info_gain = self.information_gain(y, left_y, right_y, self.info_gain_method)
-
-                    if curr_info_gain > max_info_gain:
-                        best_split["feature_index"] = feature_index
-                        best_split["threshold"] = threshold
-                        best_split["dataset_left"] = dataset_left
-                        best_split["dataset_right"] = dataset_right
-                        best_split["info_gain"] = curr_info_gain
-                        max_info_gain = curr_info_gain
-      
-        return best_split
-    
-    def split(self, dataset, feature_index, threshold):
-        
-        dataset_left = np.array([row for row in dataset if row[feature_index]<=threshold])
-        dataset_right = np.array([row for row in dataset if row[feature_index]>threshold])
-        return dataset_left, dataset_right
-    
-    def information_gain(self, parent, l_child, r_child, mode):
-        if l_child is None or r_child is None:
-            return 0
-
-        weight_l = len(l_child) / len(parent)
-        weight_r = len(r_child) / len(parent)
-
-        if mode == "Gini":
-            gain = self.gini_index(parent) - (weight_l * self.gini_index(l_child) + weight_r * self.gini_index(r_child))
-        else:
-            gain = self.entropy(parent) - (weight_l * self.entropy(l_child) + weight_r * self.entropy(r_child))
-
-        return gain
-
-    
-    def entropy(self, y):
-        
-        class_labels = np.unique(y)
-        entropy = 0
-        for cls in class_labels:
-            p_cls = len(y[y == cls]) / len(y)
-            entropy += -p_cls * np.log2(p_cls)
-        return entropy
-    
-    def gini_index(self, y):
-        
-        class_labels = np.unique(y)
-        gini = 0
-        for cls in class_labels:
-            p_cls = len(y[y == cls]) / len(y)
-            gini += p_cls**2
-        return 1 - gini
-        
-    def calculate_leaf_value(self, Y):
-
-        Y = list(Y)
-        return max(Y, key=Y.count)
-    
-    def fit(self, X, Y):
-        if len(Y.shape) == 1:
-            Y = Y.reshape(-1, 1)
-        dataset = np.concatenate((X, Y), axis=1)
-        self.root = self.build_tree(dataset)
-
-    
-    def predict(self, X):
-        
-        preditions = [self.make_prediction(x, self.root) for x in X]
-        return preditions
-    
-    def make_prediction(self, x, tree):
-        if tree.value is not None:
-            return tree.value
-
-        feature_val = x[tree.feature_index]
-        if feature_val <= tree.threshold:
-            return self.make_prediction(x, tree.left)
-        else:
-            return self.make_prediction(x, tree.right)
-              
-class RandomForestClassifier:
-    def __init__(self, n_trees, max_depth, min_samples_split, n_features, info_gain_method):
-        self.n_trees = n_trees
-        self.max_depth = max_depth
-        self.min_samples_split = min_samples_split
-        self.n_features = n_features
-        self.trees = []
-        self.info_gain_method = info_gain_method
-
-    def fit(self, X, Y):
-        for i in range(self.n_trees):
-            # Create a sub-dataset randomly
-            subset_indices = np.random.choice(len(X), len(X), replace=True)
-            subset_X = X[subset_indices, :]
-            subset_Y = Y[subset_indices]
-
-            # compute the decision tree of the sub-dataset
-            tree = DtClassifier(
-                min_samples_split=self.min_samples_split,
-                max_depth=self.max_depth,
-                info_gain_method=self.info_gain_method,
-                n_features=self.n_features
-            )
-            tree.fit(subset_X, subset_Y)
-
-            self.trees.append(tree) #add it to the forest
-
-    def predict(self, X):
-        tree_predictions = [tree.predict(X) for tree in self.trees]
-
-        #predict using majority voting 
-        predictions = np.array(tree_predictions).T.astype(int)
-        final_predictions = [np.argmax(np.bincount(prediction)) for prediction in predictions]
-        return final_predictions
-
-class K_MEANS:
-    def __init__(self,k,methode_d,methode_c,max_iterations, dataset) -> None:
-        self.k = k
-        self.centroid=[]
-        self.dataset_letiqu = np.hstack((dataset[:,:].copy(), -1*np.ones((dataset[:,:].shape[0], 1))))
-        self.methode_c=methode_c
-        self.methode_d=methode_d
-        self.max_iterations=max_iterations
-
-    def fit(self,xt):
-        self.Xtrain=xt
-    def centroid_selection(self,methode):
-        if methode=="Random":#random sans prendre le meme
-            self.centroid.extend(self.Xtrain[random.sample(range(self.Xtrain.shape[0]), self.k),:])   
-        elif methode=="Better picking":#better picking
-            self.centroid.append(list(self.Xtrain[np.random.choice(self.Xtrain.shape[0]),:]))
-            dist =  np.apply_along_axis(lambda x: distance(x, self.centroid[0], self.methode_d), axis=1, arr=self.Xtrain)
-            ind = np.argsort(dist)
-            for i in range(self.k,0,-1):
-                self.centroid.append(list(self.Xtrain[ind[int((len(ind)/self.k)*i )-1],:]))
-    
-    def _cluster(self):#instance
-        #choose centroid 
-        self.centroid_selection(self.methode_c)  
-        #boucle
-        change=True
-        nbr_iteration=0
-        while(change):
-        #distance
-            for j in range(self.Xtrain.shape[0]):
-                distances=[]
-                for i in range(self.k):
-                    distances.append(distance(instance1= self.centroid[i], instance2= self.Xtrain[j,:] ,methode=self.methode_d))
-                #affectation
-                c =np.argmin(distances)
-                self.dataset_letiqu[j,-1]=c
-            #maj centroid
-            oldcentroid=self.centroid.copy()
-            for i in range(self.k):
-                cluster=np.array([row[:-1] for row in self.dataset_letiqu if row[-1]==i])
-                self.centroid[i]=np.array([np.average(cluster[:,j]) for j in range(cluster.shape[1])] )
-
-            if np.linalg.norm(np.array(self.centroid) - np.array(oldcentroid)) < 0.0001 or nbr_iteration>self.max_iterations:
-                change=False
-            nbr_iteration+=1
-        return self.dataset_letiqu
-    #bonus
-    def _prediction(self,instance):
-        distances=[]
-        print("centroids array: ", self.centroid)
-        for i in range(self.k):
-            distances.append(distance(self.centroid[i],instance,self.methode_d))
-        return np.argmin(distances),np.array([row[:-1] for row in self.dataset_letiqu if row[-1]==np.argmin(distances)])
-
-class ClusteringMetrics:
-    def __init__(self, dataset, y_pred):
-        self.dataset = dataset
-        self.y_pred = y_pred
-    
-    def silhouette_score(self, data, labels, metric):
-        num_points = len(data)
-        unique_labels = np.unique(labels)
-        silhouette_values = np.zeros(num_points)
-
-        intra_cluster_distances = np.zeros(num_points)
-        inter_cluster_distances = np.zeros(num_points)
-
-        for i in range(num_points):
-            #ai
-            label_i = labels[i]
-            cluster_i_indices = np.where(labels == label_i)[0] # get own cluster points
-            if len(cluster_i_indices) == 1:
-                silhouette_i = 0  # Set silhouette score to 0 for single point clusters
-            else:
-                a_i = np.mean([distance(data[i],data[j],metric) for j in cluster_i_indices if j != i])
-                inter_cluster_distances[i] = a_i
-
-                #bi
-                b_i_values = []
-                for label_j in unique_labels:
-                    if label_j != label_i:
-                        cluster_j_indices = np.where(labels == label_j)[0] # get neighbor clusters points
-                        b_ij = np.mean([distance(data[i], data[j], metric) for j in cluster_j_indices])
-                        b_i_values.append(b_ij)
-                
-                # get the average distance to the nearest neighbor cluster bi
-                b_i = min(b_i_values) if b_i_values else 0
-                intra_cluster_distances[i] = b_i
-
-                # silhouette score of the point i
-                silhouette_i = (b_i - a_i) / max(a_i, b_i)
-                
-            silhouette_values[i] = silhouette_i
-                
-        # silhouette score of data
-        silhouette_score_avg = np.mean(silhouette_values)
-        
-        # Calculate overall intra-cluster and inter-cluster distances
-        intra_distance = np.sum(intra_cluster_distances)
-        inter_distance = np.sum(inter_cluster_distances)
-
-        return silhouette_score_avg, intra_distance, inter_distance
-
-class Point:
-    def __init__(self, instance):
-        self.instance=instance
-        self.marked=False
-        self.cluster=False
-         
-def Voisinage(P,radius,methode_d, dataset):
-    voisins=[]
-    for i in range(dataset.shape[0]):
-        if  distance(dataset[i,:],P.instance,methode_d) <=radius:
-            voisins.append(i)
-    return voisins
-
-def DB_Scan(radius,min_points,methode_d, dataset):
-    C = 0
-    Outlier=[]
-    dataset_labeled=[]
-    listeP=[ Point(instance) for instance in dataset]
-    
-    for P in listeP:
-        if not P.marked:
-            P.marked=True
-            PtsVoisins = Voisinage(P, radius,methode_d, dataset) 
-            if len(PtsVoisins) < min_points :
-                Outlier.append(P)
-                dataset_labeled.append(np.append(P.instance,-1)) 
-            else:
-                C+=1 #new cluster
-                P.instance=np.append(P.instance,C)
-                P.cluster=True 
-                dataset_labeled.append(P.instance)
-                for i in PtsVoisins:
-                    if not listeP[i].marked :
-                        listeP[i].marked=True
-                        v=Voisinage(listeP[i], radius,methode_d, dataset)
-                        if len(v) >= min_points :
-                            PtsVoisins.extend(v) 
-                    if (not listeP[i].cluster) : 
-                        listeP[i].cluster=True
-                        if listeP[i] in Outlier:
-                            Outlier.remove(listeP[i])
-                            for j in range(len(dataset_labeled)):
-                                if  np.array_equal( dataset_labeled[j][:-1],listeP[i].instance):
-                                    listeP[i].instance=np.append(listeP[i].instance,C)
-                                    dataset_labeled[j][-1]=C 
-                                    break                        
-                        else: 
-                            listeP[i].instance=np.append(listeP[i].instance,C)
-                            dataset_labeled.append(listeP[i].instance)
-        
-    return [list(i[:-1]) for i in dataset_labeled ],[i[-1] for i in dataset_labeled ],([i for i in dataset_labeled if i[-1]==-1])
-
-
 class App:
     def __init__(self):
-        self.df1 = pd.read_csv('Dataset1.csv')
-        self.dt1 = np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1)
-        self.dataset11 = (np.genfromtxt('Dataset1.csv', delimiter=',', dtype=float, skip_header=1))[:,:-1]
-        self.attribute_analyzer = AttributeAnalyzer(self.dt1, self.df1)
-        self.dataFrame2 = pd.read_csv('Dataset2.csv')
+        self.df1 = pd.read_csv('datasets\Dataset1.csv')
+        self.dt1 = np.genfromtxt('datasets\Dataset1.csv', delimiter=',', dtype=float, skip_header=1)
+        self.dataset11 = (np.genfromtxt('datasets\Dataset1.csv', delimiter=',', dtype=float, skip_header=1))[:,:-1]
+        self.attribute_analyzer = attributeAnalyzer.AttributeAnalyzer(self.dt1, self.df1)
+        self.dataFrame2 = pd.read_csv('datasets\Dataset2.csv')
         self.dataFrame2 = self.dataFrame2.replace({pd.NA: np.nan})
         self.dataset2 = self.dataFrame2.to_numpy()
-        self.preprocessor2 = Preprocessing(self.dataset2, self.dataFrame2)
-        self.dataFrame3 = pd.read_csv('Dataset3.xlsx - 8.forFMI.csv', delimiter=',', decimal=',')
+        self.preprocessor2 = preprocessing.Preprocessing(self.dataset2, self.dataFrame2)
+        self.dataFrame3 = pd.read_csv('datasets\Dataset3.xlsx - 8.forFMI.csv', delimiter=',', decimal=',')
         self.dataset3 = self.dataFrame3.to_numpy()
-        self.FIL = FrequentItemsets()
+        self.FIL = FrequentItemsets.FrequentItemsets()
         self.selected_attribute_dataset3 = 0
         self.create_interface()
         
@@ -1127,12 +47,12 @@ class App:
         return num_rows, num_cols, attr_desc
     
     def preprocessing_general1(self, manque_meth, aberrante_meth, normalization_meth, vmin, vmax):
-        self.preprocessor1 = Preprocessing(self.dt1, self.df1)
+        self.preprocessor1 = preprocessing.Preprocessing(self.dt1, self.df1)
         self.preprocessor1.remplacement_manquant_generale(manque_meth)
         self.preprocessor1.remplacement_aberantes_generale(aberrante_meth)
-        self.preprocessor1.normalisation_generale(normalization_meth, int(vmin), int(vmax))
         self.preprocessor1.reduire_row() 
         self.preprocessor1.reduire_dim(0.75)
+        self.preprocessor1.normalisation_generale(normalization_meth, int(vmin), int(vmax))
         self.dataset1 = self.preprocessor1.dataset
         self.dataFrame1 = self.preprocessor1.dataFrame
         self.vmin = vmin
@@ -1141,7 +61,7 @@ class App:
         self.aberrante_meth = aberrante_meth
         self.normalization_meth = normalization_meth
         return pd.DataFrame(self.dataset1, columns=[col for col in self.dataFrame1.columns.tolist()])
-    
+     
     def preprocessing_general2(self, manque_meth, aberrante_meth):
         for row in self.dataset2:
             row[3] = self.preprocessor2.convert_date(row[1], row[3])
@@ -1152,14 +72,14 @@ class App:
         return self.dataset2
     
     def plots(self, df, graph, graph_type1, attribute1, zone2, attribute2, period2, year2, month2, year22, n5, time_period6, attribute6):
-        stats = StatisticsCOVID19(df)
+        stats = StatisticsCOVID19.StatisticsCOVID19(df)
         if graph == "Total des cas confirmés et tests positifs par zones":
             if graph_type1 == "Bar Chart":
                 plot1 = plt.figure()
                 stats.plot_total_cases_and_positive_tests(attribute1)
-                plot1.savefig("plot1.png")
+                plot1.savefig("plots\\plot1.png")
                 plt.close(plot1)
-                plot = ["plot1.png"]
+                plot = ["plots\\plot1.png"]
                 return plot
             
             if graph_type1 == "Tree Map":
@@ -1171,57 +91,57 @@ class App:
             if period2 == "Weekly":
                 plot2 = plt.figure()
                 stats.weekly_plot(zone2, year2, month2, attribute2)
-                plot2.savefig("plot2_weekly.png")
+                plot2.savefig("plots\\plot2_weekly.png")
                 plt.close(plot2)
-                plot = ["plot2_weekly.png"]
+                plot = ["plots\\plot2_weekly.png"]
                 return plot
             
             if period2 == "Monthly":
                 plot2 = plt.figure()
                 stats.monthly_plot(zone2, year22, attribute2)
-                plot2.savefig("plot2_monthly.png")
+                plot2.savefig("plots\\plot2_monthly.png")
                 plt.close(plot2)
-                plot = ["plot2_monthly.png"]
+                plot = ["plots\\plot2_monthly.png"]
                 return plot
             
             if period2 == "Annual":
                 plot2 = plt.figure()
                 stats.annual_plot(zone2, attribute2)
-                plot2.savefig("plot2_annual.png")
+                plot2.savefig("plots\\plot2_annual.png")
                 plt.close(plot2)
-                plot = ["plot2_annual.png"]
+                plot = ["plots\\plot2_annual.png"]
                 return plot
             
         if graph == "Total des cas par zone et par année":
             plot3 = plt.figure()
             stats.stacked_bar_plot()
-            plot3.savefig("plot3.png")
+            plot3.savefig("plots\\plot3.png")
             plt.close(plot3)
-            plot = ["plot3.png"]
+            plot = ["plots\\plot3.png"]
             return plot
         
         if graph == "Rapport entre la population et le nombre de tests effectués":
             plot4 = plt.figure()
             stats.pop_tests_plot()
-            plot4.savefig("plot4.png")
+            plot4.savefig("plots\\plot4.png")
             plt.close(plot4)
-            plot = ["plot4.png"]
+            plot = ["plots\\plot4.png"]
             return plot
         
         if graph == "Top 5 des zones les plus impactées par le coronavirus":
             plot5 = plt.figure()
             stats.plot_top_zones_impacted(n5)
-            plot5.savefig("plot5.png")
+            plot5.savefig("plots\\plot5.png")
             plt.close(plot5)
-            plot = ["plot5.png"]
+            plot = ["plots\\plot5.png"]
             return plot
         
         if graph == "Rapport entre les cas confirmés, les tests effectués et les tests positifs a une periode choisie pour chaque zone":
             plot6 = plt.figure()
             stats.plot_time_period_data(time_period6, attribute6)
-            plot6.savefig("plot6.png")
+            plot6.savefig("plots\\plot6.png")
             plt.close(plot6)
-            plot = ["plot6.png"]
+            plot = ["plots\\plot6.png"]
             return plot
 
     def Discretisation(self, method, attribute, K):
@@ -1278,9 +198,9 @@ class App:
         plt.xlabel(f'{attribute_label}')
         plt.ylabel('Frequency')
         plt.title(f'Discretized {attribute_label}')
-        plot.savefig("discretization_plot.png")
+        plot.savefig("plots\discretization_plot.png")
         plt.close(plot)
-        plot = ["discretization_plot.png"]
+        plot = ["plots\\discretization_plot.png"]
         return self.dataset3, plot, self.transactions_table
 
     def FIL_general(self, transactions_table, supp_min, conf_min, metric):
@@ -1297,17 +217,17 @@ class App:
 
         plot2 = plt.figure()
         self.FIL.freq_items_nbr_plot(self.transactions_table, supp_lower_bound, supp_upper_bound)
-        plot2.savefig("freq_items_nbr_plot.png")
+        plot2.savefig("plots\\freq_items_nbr_plot.png")
         plt.close(plot2)
 
         plot3 = plt.figure()
         self.FIL.time_exec_plot(self.transactions_table, supp_lower_bound, supp_upper_bound)
-        plot3.savefig("time_exec_plot.png")
+        plot3.savefig("plots\\time_exec_plot.png")
         plt.close(plot3)
 
         plot4 = self.FIL.memory_alloc_plot(self.transactions_table, supp_lower_bound, supp_upper_bound, conf_lower_bound, conf_upper_bound)
 
-        plots = [plot1, "freq_items_nbr_plot.png", "time_exec_plot.png", plot4]
+        plots = [plot1, "plots\\freq_items_nbr_plot.png", "plots\\time_exec_plot.png", plot4]
         
         return plots
 
@@ -1378,10 +298,10 @@ class App:
         plt.savefig(buffer, format='png')
         plt.close(fig)
 
-        with open(f"confusion_matrix_{model}.png", 'wb') as f:
+        with open(f"plots\\confusion_matrix_{model}.png", 'wb') as f:
             f.write(buffer.getvalue())
 
-        return f"confusion_matrix_{model}.png"
+        return f"plots\\confusion_matrix_{model}.png"
 
     def clustering_plots(self, res0, res):
         plt.scatter([r[0] for r in res0], [r[1] for r in res0], c=res, cmap='cividis', marker='H', edgecolors='k')
@@ -1398,18 +318,18 @@ class App:
 
         metric = int(self.metric_value(metric, int(minkowski_param)))
 
-        self.preprocessor_instance = Preprocessing(dataset_instance, pd.DataFrame(dataset_instance))
+        self.preprocessor_instance = preprocessing.Preprocessing(dataset_instance, pd.DataFrame(dataset_instance))
         self.preprocessor_instance.remplacement_manquant_generale(self.manque_meth)
         self.preprocessor_instance.remplacement_aberantes_generale(self.aberrante_meth)
-        self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
-        self.preprocessor_instance.reduire_row()
+        self.preprocessor_instance.reduire_row() 
         self.preprocessor_instance.reduire_dim(0.75)
+        self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
+        
         dataset = self.preprocessor_instance.dataset
         instance = dataset[-1]
-        print(instance)
 
         if model == 'KNN':
-            KNNClassifier = KNN(int(knn_param), metric)
+            KNNClassifier = KNN.KNN(int(knn_param), metric)
             KNNClassifier.fit(X_train, Y_train) 
             y_pred=[]
             for i in X_test:
@@ -1417,18 +337,18 @@ class App:
             y_instance=KNNClassifier._predict(instance)
 
         if model == 'Decision Trees':
-            DTClassifier = DtClassifier(min_samples_split=int(min_samples_split_DT), max_depth=int(max_depth_DT), info_gain_method=info_gain_metric_DT)
+            DTClassifier = DtClassifier.DtClassifier(min_samples_split=int(min_samples_split_DT), max_depth=int(max_depth_DT), info_gain_method=info_gain_metric_DT)
             DTClassifier.fit(X_train, Y_train)
             y_pred = DTClassifier.predict(X_test)
             y_instance=DTClassifier.predict(np.array([instance]))
 
         if model == 'Random Forest':
-            random_forest = RandomForestClassifier(n_trees=int(nbr_trees_RF), max_depth=int(max_depth_RF), min_samples_split=int(min_samples_split_RF), n_features=int(nbr_features_RF), info_gain_method=info_gain_metric_RF)
+            random_forest = RandomForestClassifier.RandomForestClassifier(n_trees=int(nbr_trees_RF), max_depth=int(max_depth_RF), min_samples_split=int(min_samples_split_RF), n_features=int(nbr_features_RF), info_gain_method=info_gain_metric_RF)
             random_forest.fit(X_train, Y_train)
             y_pred = random_forest.predict(X_test) 
             y_instance=random_forest.predict(np.array([instance]))
 
-        self.ClassifierMetrics = ClassifierMetrics(Y_test, y_pred)
+        self.ClassifierMetrics = ClassifierMetrics.ClassifierMetrics(Y_test, y_pred)
         
         confusion_matrix = self.ClassifierMetrics.confusion_matrix(Y_test, y_pred)
         TP, FN, FP, TN = self.ClassifierMetrics.Values(confusion_matrix)
@@ -1480,18 +400,18 @@ class App:
             instance = np.array([[float(item) for item in inner_list] for inner_list in instance])
             dt1 = np.vstack([self.dataset11, instance])
 
-            self.preprocessor_instance = Preprocessing(dt1, pd.DataFrame(dt1))
+            self.preprocessor_instance = preprocessing.Preprocessing(dt1, pd.DataFrame(dt1))
             self.preprocessor_instance.remplacement_manquant_generale(self.manque_meth)
             self.preprocessor_instance.remplacement_aberantes_generale(self.aberrante_meth)
-            self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
-            self.preprocessor_instance.reduire_row()
+            self.preprocessor_instance.reduire_row() 
             self.preprocessor_instance.reduire_dim(0.75)
+            self.preprocessor_instance.normalisation_generale(self.normalization_meth, int(self.vmin), int(self.vmax)) 
             dt1 = self.preprocessor_instance.dataset
             if pca_clust == 'Yes':
                 dt1 = pca.fit_transform(dt1)
             instance = dt1[-1]
 
-            kmeansClustering = K_MEANS(k=int(n_cluster_km),methode_d=metric,methode_c=centroid_select_method_km,max_iterations=max_iterations_km, dataset=dataset)#k=2, pca=2, methode_d2 methode_c 1 3000 800
+            kmeansClustering = Kmeans.K_MEANS(k=int(n_cluster_km),methode_d=metric,methode_c=centroid_select_method_km,max_iterations=max_iterations_km, dataset=dataset)#k=2, pca=2, methode_d2 methode_c 1 3000 800
             kmeansClustering.fit(dataset)
             res=kmeansClustering._cluster()
             res0 = res[:, :-1]
@@ -1501,24 +421,23 @@ class App:
             labeled_dataset = pd.DataFrame(km_labeled_dataset, columns=[f"feature_{i+1}" for i in range((km_labeled_dataset.shape[1])-1)] + ["cluster_label"])
 
         else:
-            DBSCANClustering=DB_Scan(radius_db, min_samples_db, methode_d=metric, dataset=dataset)# 1.2 5 0.45  1/0/1
+            DBSCANClustering=DBScan.DB_Scan(radius_db, min_samples_db, methode_d=metric, dataset=dataset)# 1.2 5 0.45  1/0/1
             res0 = np.array(DBSCANClustering[0])
             res = np.array(DBSCANClustering[1])
-            print("result:", res)
 
             DBSCAN_labeled_dataset = np.concatenate((self.dataset1[:, :-1], res.reshape(-1, 1)), axis=1)
             labeled_dataset = pd.DataFrame(DBSCAN_labeled_dataset, columns=[f"feature_{i+1}" for i in range((DBSCAN_labeled_dataset.shape[1])-1)] + ["cluster_label"])
             
-        self.ClusteringMetrics = ClusteringMetrics(res0, res)
+        self.ClusteringMetrics = ClusteringMetrics.ClusteringMetrics(res0, res)
         silhouette_score, intra_distance, inter_distance = self.ClusteringMetrics.silhouette_score(res0, res, metric)
 
 
         if pca_clust=="Yes":
             plot1 = plt.figure()
             self.clustering_plots(res0, res)
-            plot1.savefig("clustering_PCA.png")
+            plot1.savefig("plots\\clustering_PCA.png")
             plt.close(plot1)
-            plot = ["clustering_PCA.png"]
+            plot = ["plots\\clustering_PCA.png"]
 
         data = {
             "Silhouette": [silhouette_score],
@@ -1551,7 +470,9 @@ class App:
                         gr.Markdown("""# Attributes Analysis""")
                         
                         with gr.Row():
-                            inputs = [gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.df1.columns.tolist())], multiselect=False, label="Attributes", info="Select an attribute : "), gr.Radio(["With Outliers", "Without Outliers"], label="Box Plot Parameters"), gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.df1.columns.tolist())], multiselect=False, label="Scatter Plot Parameters", info="Select a second attribute for the scatter plot : ")]
+                            inputs = [gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.df1.columns.tolist())], multiselect=False, label="Attributes", info="Select an attribute : "), 
+                                      gr.Radio(["With Outliers", "Without Outliers"], label="Box Plot Parameters"), 
+                                      gr.Dropdown([(f"{att}", i) for i, att in enumerate(self.df1.columns.tolist())], multiselect=False, label="Scatter Plot Parameters", info="Select a second attribute for the scatter plot : ")]
                         
                         with gr.Row():
                             with gr.Column():
@@ -1576,7 +497,7 @@ class App:
 
                         with gr.Row():
                             inputs = [gr.Dropdown(["Mode", "Mean"], multiselect=False, label="Missing Values", info="Select a method to handle the missing values in the dataset :"), 
-                                gr.Dropdown(["Linear Regression", "Discritisation"], multiselect=False, label="Outliers", info="Select a method to handle the outliers in the dataset :"), 
+                                gr.Dropdown(["Linear Regression", "Discritisation", "Winorisation"], multiselect=False, label="Outliers", info="Select a method to handle the outliers in the dataset :"), 
                                 gr.Dropdown(["Vmin-Vmax", "Z-Score"], multiselect=False, label="Normalization", info="Select a method to normalize the dataset :"),
                                 gr.Textbox(label="Vmin", visible=True, interactive=True, value=0),
                                 gr.Textbox(label="Vmax", visible=True, interactive=True, value=0)]
