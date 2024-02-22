@@ -2,14 +2,14 @@
 
 ## Overview
 
-This repository contains the code and documentation for a comprehensive data mining university project focusing on soil fertility analysis and COVID-19 cases evolution. The project incorporates both static and temporal datasets and integrates various data mining techniques, including data exploration, preprocessing, visualization, clustering, classification, association rule mining, and evaluation. The project includes a GUI built using Gradio that provides an interactive environment for users to perform data mining tasks. 
+This repository contains the code and documentation for a comprehensive data mining university project focusing on soil fertility analysis and COVID-19 cases evolution. The project incorporates both static and temporal datasets and integrates various data mining techniques, including data exploration, preprocessing, visualization, clustering, classification, association rule mining, and evaluation. The project includes a **GUI** built using Gradio that provides an interactive environment for users to perform data mining tasks. 
 
 **Note**: All methods and algorithms are implemented from scratch.
 
 ---
 ![GUI Screenshot](screenshots.png)
 
-## Description
+## Features
 
 1. **Data Exploration and Preprocessing:**
    - Visualizing datasets and exploring attributes.
